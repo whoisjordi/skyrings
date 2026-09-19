@@ -19,12 +19,23 @@ export const TUNE = {
   pitchRate: 1.0,      // rad/s at full deflection
   rollRate: 2.2,
   yawRate: 0.5,
-  turnG: 20,           // coordinated turn: omega = turnG * tan(bank) / speed
-  bankLimit: 1.26,     // 72deg — holding aileron settles here instead of rolling
-  maxTurnRate: 1.0,    // rad/s ceiling, so a slow tight turn can't spin
-  autoLevel: 1.3,      // wings return to level when you let go
+  turnG: 12,           // how hard horizontal lift pulls the nose round
+  pullLoad: 3,         // back-pressure raises the load factor to 1..4g (as pull^2)
+  turnDrag: 0.7,       // induced drag, paid on load^2 - this is what makes a
+                       // hard turn expensive and a gentle one nearly free
+  maxTurnRate: 1.2,    // rad/s ceiling, so nothing can spin on the spot
+  autoLevel: 0.2,      // gentle drift back to wings-level, hands off only
   throttleRate: 0.55,  // full travel in ~1.8s
-  rotateSpeed: 55,     // runway speed at which the nose will lift
+  rotateSpeed: 62,     // runway speed at which the nose will lift
+
+  // Slow flight. The wing runs out of margin well before it actually stalls:
+  // below mushSpeed the nose sags and you sink, and it gets worse all the way
+  // down to the stall, where it lets go properly.
+  mushSpeed: 70,
+  mushSink: 11,
+  mushPitchDown: 0.8,
+  stallSink: 45,
+  stallPitchDown: 2.5,
   groundSteer: 0.85,
   groundDrag: 2.5,
   brakeDecel: 34,      // wheel brakes: ~100kt to a standstill in about 3s
@@ -149,6 +160,13 @@ export class Plane {
 
   /** sin(bank): 0 level, negative banked right. */
   get bank() { return this.right.y; }
+
+  /**
+   * Signed bank angle in radians, positive to the left, and correct all the
+   * way round: asin(bank) folds back on itself past 90 degrees and cannot
+   * tell a steep bank from an inverted one.
+   */
+  get bankAngle() { return Math.atan2(this.right.y, this.up.y); }
   /** True while the wing is not producing enough lift. */
   get stalling() { return !this.onGround && this.speed < TUNE.stall; }
 
@@ -248,60 +266,59 @@ export class Plane {
     const drag = TUNE.drag * (1 - tuck * (1 - TUNE.gearDragFactor));
     const thrust = TUNE.thrust * (1 + tuck * (TUNE.gearThrustBonus - 1)) * this._boost;
 
+    // Back-pressure sets the load factor. This is the heart of the handling:
+    // banking alone barely turns you, pulling is what bends the flight path,
+    // and the induced drag below is what it costs.
+    // Quadratic in back-pressure, so easing the nose up in a climb is nearly
+    // free while a hard pull is genuinely expensive.
+    const pull = clamp(ctrl.pitch, 0, 1);
+    const load = 1 + TUNE.pullLoad * pull * pull;
+
     const accel = thrust * this.throttle
       - drag * this.speed * this.speed
       - TUNE.gravity * fwdY
+      - TUNE.turnDrag * (load * load - 1)
       - (ctrl.brake ? TUNE.airbrake : 0);
 
     // The boost needs headroom above the ordinary ceiling to be worth anything.
     const cap = TUNE.maxSpeed * (1 + this.nitroBlend * (NITRO.speedCapMult - 1));
     this.speed = clamp(this.speed + accel * dt, 0, cap);
 
-    // Controls go soft as the airflow dies, which is what makes a stall read.
-    const authority = clamp((this.speed - 10) / 48, 0.12, 1);
+    // Everything the wing and tail can do scales with airspeed. Slow, and the
+    // aeroplane goes vague long before it stalls.
+    const authority = clamp((this.speed - 18) / 75, 0.1, 1);
 
     this._rotateLocal(AX.x, ctrl.pitch * TUNE.pitchRate * authority * dt);
     this._rotateLocal(AX.y, -ctrl.yaw * TUNE.yawRate * authority * dt);
 
-    const upright = this.up.y > 0;
-    const phi = Math.asin(clamp(this.bank, -1, 1)); // bank angle, + is left wing up
+    // Aileron commands a roll RATE, with no ceiling: hold it and the aeroplane
+    // keeps rolling straight through inverted, which is what makes aerobatics
+    // possible at all.
+    this._rotateLocal(AX.z, -ctrl.roll * TUNE.rollRate * authority * dt);
 
-    // Aileron sets a bank angle rather than spinning the aeroplane. Resistance
-    // builds as the bank approaches the limit, so holding the key settles into
-    // a steady carving turn — the single biggest thing that makes this feel
-    // like flying rather than fighting. Inverted, the limiter lets go so you
-    // can always roll back upright.
-    let rollRate = -ctrl.roll * TUNE.rollRate * authority;
-    if (upright && rollRate !== 0 && Math.sign(rollRate) === Math.sign(phi)) {
-      const t = Math.min(1, Math.abs(phi) / TUNE.bankLimit);
-      rollRate *= 1 - t * t * t;
-    }
-    this._rotateLocal(AX.z, rollRate * dt);
-
-    // Wings self-centre when the player lets go — but never while inverted,
-    // so a deliberate roll isn't fought by the autopilot.
-    if (ctrl.roll === 0 && upright) {
+    // Hands off, it drifts back towards wings-level — gently enough that a
+    // bank can be held through a long turn, and never while inverted.
+    if (ctrl.roll === 0 && this.up.y > 0) {
       this._rotateLocal(AX.z, -this.bank * TUNE.autoLevel * dt);
     }
 
-    // Coordinated turn: banking tips the lift vector sideways and the nose
-    // follows. Tightens as you slow down, exactly as it should.
-    if (upright) {
-      const turn = clamp(
-        (TUNE.turnG * Math.tan(phi)) / Math.max(this.speed, 30),
-        -TUNE.maxTurnRate, TUNE.maxTurnRate,
-      );
-      this.quaternion.premultiply(Q.a.setFromAxisAngle(AX.y, turn * dt));
-    }
+    const turn = this._liftTurn(load, authority);
+    if (turn) this.quaternion.premultiply(Q.a.setFromAxisAngle(AX.y, turn * dt));
 
-    // Too slow: the nose drops hard and you sink until the speed comes back.
-    // The pitch-down has to beat the player's own back-pressure, otherwise the
-    // aeroplane can hang nose-up at zero speed and never recover.
     let sink = 0;
+    const mush = clamp(
+      1 - (this.speed - TUNE.stall) / (TUNE.mushSpeed - TUNE.stall), 0, 1,
+    );
+    if (mush > 0) {
+      sink += mush * TUNE.mushSink;
+      this._rotateLocal(AX.x, -mush * TUNE.mushPitchDown * dt);
+    }
+    // Below the stall the nose drops hard enough to beat the player's own
+    // back-pressure, otherwise it can hang nose-up at zero speed for ever.
     if (this.speed < TUNE.stall) {
       const deficit = 1 - this.speed / TUNE.stall;
-      sink = deficit * 45;
-      this._rotateLocal(AX.x, -deficit * 2.5 * dt);
+      sink += deficit * TUNE.stallSink;
+      this._rotateLocal(AX.x, -deficit * TUNE.stallPitchDown * dt);
     }
 
     this.velocity.copy(this.forward).multiplyScalar(this.speed);
@@ -310,6 +327,31 @@ export class Plane {
     this.position.addScaledVector(this.velocity, dt);
 
     return this._checkContact(world);
+  }
+
+  /**
+   * Turn rate from lift.
+   *
+   * Lift acts out of the top of the wing; whatever part of it ends up
+   * horizontal is what drags the nose round. Deriving it from the lift vector
+   * rather than from a bank angle means it stays correct inverted and at 90
+   * degrees of bank, where an asin(bank) formula falls apart.
+   *
+   * @returns {number} rad/s about world up, positive to the left
+   */
+  _liftTurn(load, authority) {
+    const up = this.up;          // V.up
+    const f = this.forward;      // V.fwd — a different scratch vector
+    const hLen = Math.hypot(f.x, f.z);
+    if (hLen < 0.05) return 0;   // pointing straight up or down: no heading
+
+    const fhx = f.x / hLen, fhz = f.z / hLen;
+    const lateral = up.x * fhz - up.z * fhx;   // horizontal lift, left positive
+
+    // authority^2, so a slow aeroplane turns lazily as well as vaguely.
+    const rate = (TUNE.turnG * load * lateral * authority * authority)
+      / Math.max(this.speed, 30);
+    return clamp(rate, -TUNE.maxTurnRate, TUNE.maxTurnRate);
   }
 
   /**

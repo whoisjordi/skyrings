@@ -112,17 +112,106 @@ function checkPhysics(cfg, w) {
   const cruise = plane.speed; // capture now: the later tests move the aeroplane
   ok(cruise > 100 && cruise < 175, `odd level cruise speed (${cruise.toFixed(0)})`);
 
-  const h0 = Math.atan2(plane.forward.x, plane.forward.z);
-  for (let i = 0; i < 240; i++) plane.update(STEP, { ...hold, roll: 1, pitch: 0.25 }, world);
-  const h1 = Math.atan2(plane.forward.x, plane.forward.z);
-  const turned = Math.abs(((h1 - h0 + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-  ok(turned > 0.5, `barely turns at full bank (${turned.toFixed(2)} rad in 2s)`);
+  // ---- handling -----------------------------------------------------------
+  // These four encode the handling brief: rolling inverted must be easy, bank
+  // alone must barely turn, hard turns must cost speed, and slow flight must
+  // be sluggish in every axis.
+  const air = { heightAt: () => -5000, airport };
+  const aloft = (speed) => {
+    const p2 = new Plane(cfg.palette);
+    p2.reset(0, 4000, 0, 0);
+    p2.onGround = false; p2.clearedRunway = true; p2.airborneFor = 99;
+    p2.speed = speed; p2.throttle = 1;
+    return p2;
+  };
+  const heading = (p2) => Math.atan2(p2.forward.x, p2.forward.z);
+  const headingDelta = (a, b) => {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d) * (180 / Math.PI);
+  };
+  // Holds a bank and a level flight path; extraPull adds back-pressure.
+  const flyBanked = (p2, targetBank, extraPull, lockSpeed) => {
+    const fpa = Math.asin(clamp(p2.forward.y, -1, 1));
+    const roll = clamp((p2.bankAngle + targetBank) * 3, -1, 1);
+    const pitch = extraPull === null ? clamp(-fpa * 4, -0.35, 0.4) : extraPull;
+    p2.update(STEP, { pitch, roll, yaw: 0, throttle: 1, brake: false }, air);
+    if (lockSpeed) p2.speed = lockSpeed;
+  };
+  const turnIn2s = (speed, bankDeg, extraPull, lockSpeed = speed) => {
+    const p2 = aloft(speed);
+    const target = bankDeg / 57.3;
+    for (let i = 0; i < 600; i++) {
+      flyBanked(p2, target, null, lockSpeed);
+      if (Math.abs(p2.bankAngle + target) < 0.05) break;
+    }
+    const h0 = heading(p2);
+    for (let i = 0; i < 240; i++) flyBanked(p2, target, extraPull, lockSpeed);
+    return { turned: headingDelta(h0, heading(p2)), speed: p2.speed };
+  };
 
-  // Holding aileron must settle into a bank, not keep rolling over.
-  for (let i = 0; i < 600; i++) plane.update(STEP, { ...hold, roll: 1 }, world);
-  const heldBank = Math.abs(Math.asin(clamp(plane.bank, -1, 1)));
-  ok(plane.up.y > 0 && heldBank > 0.8 && heldBank < 1.45,
-    `holding aileron does not settle into a bank (${heldBank.toFixed(2)} rad, up.y ${plane.up.y.toFixed(2)})`);
+  // 1. Full aileron must roll all the way over, and reasonably quickly.
+  for (const speed of [60, 120]) {
+    const p2 = aloft(speed);
+    let invertedAt = null;
+    for (let i = 0; i < 900; i++) {
+      p2.update(STEP, { pitch: 0, roll: 1, yaw: 0, throttle: 1, brake: false }, air);
+      p2.speed = speed;
+      if (p2.up.y < 0 && invertedAt === null) invertedAt = i / 120;
+    }
+    ok(invertedAt !== null && invertedAt < 2.5,
+      `cannot roll inverted at ${speed}kt (${invertedAt === null ? 'never' : invertedAt.toFixed(1) + 's'})`);
+  }
+
+  // 2. Bank alone is not a turn — the back-pressure is.
+  const lazy = turnIn2s(120, 45, null);
+  const pulled = turnIn2s(120, 45, 1);
+  ok(lazy.turned < 20, `banking alone turns too much (${lazy.turned.toFixed(0)} deg in 2s)`);
+  ok(pulled.turned > lazy.turned * 4,
+    `pulling barely tightens the turn (${pulled.turned.toFixed(0)} vs ${lazy.turned.toFixed(0)} deg)`);
+
+  // 3. A hard turn costs speed; a gentle one is nearly free.
+  const gentle = turnIn2s(120, 50, null, 0);
+  const hard = turnIn2s(120, 50, 1, 0);
+  ok(gentle.speed > 115, `a gentle turn bleeds too much speed (${gentle.speed.toFixed(0)}kt)`);
+  ok(hard.speed < gentle.speed - 20,
+    `a hard turn costs too little speed (${hard.speed.toFixed(0)} vs ${gentle.speed.toFixed(0)}kt)`);
+
+  // 4. Slow flight is sluggish: it turns lazily and will not climb.
+  const slowTurn = turnIn2s(60, 45, 1).turned;
+  const fastTurn = turnIn2s(120, 45, 1).turned;
+  ok(slowTurn < fastTurn * 0.6,
+    `slow flight turns as well as fast (${slowTurn.toFixed(0)} vs ${fastTurn.toFixed(0)} deg)`);
+
+  const climbFrom = (speed) => {
+    const p2 = aloft(speed);
+    p2.throttle = 1;
+    const y0 = p2.position.y;
+    for (let i = 0; i < 360; i++) {
+      p2.update(STEP, { pitch: 1, roll: 0, yaw: 0, throttle: 0, brake: false }, air);
+    }
+    return p2.position.y - y0;
+  };
+  ok(climbFrom(45) < 0, `still climbs at 45kt (${climbFrom(45).toFixed(0)})`);
+  ok(climbFrom(120) > 100, `will not climb at 120kt (${climbFrom(120).toFixed(0)})`);
+
+  // 5. Hands off, a bank washes out slowly enough to fly a turn with.
+  {
+    const p2 = aloft(120);
+    for (let i = 0; i < 600; i++) {
+      flyBanked(p2, 40 / 57.3, null, 120);
+      if (Math.abs(p2.bankAngle + 40 / 57.3) < 0.05) break;
+    }
+    let t = 0;
+    while (t < 40 && Math.abs(p2.bankAngle) > 0.09) {
+      p2.update(STEP, { pitch: 0, roll: 0, yaw: 0, throttle: 1, brake: false }, air);
+      p2.speed = 120;
+      t += STEP;
+    }
+    ok(t > 4, `wings snap level too fast to hold a turn (${t.toFixed(1)}s from 40 deg)`);
+    ok(t < 30, `wings never return to level (${t.toFixed(1)}s from 40 deg)`);
+  }
 
   // Wheel brakes must stop a landing roll well inside the runway.
   {
@@ -266,7 +355,11 @@ function checkPhysics(cfg, w) {
   }
   ok(plane.speed > TUNE.stall * 1.5, `cannot recover from a stall (${plane.speed.toFixed(0)})`);
 
-  return { takeoffTime: t, rollDist, cruise, turned, minSpeed, heldBank };
+  return {
+    takeoffTime: t, rollDist, cruise, minSpeed,
+    lazyTurn: lazy.turned, pulledTurn: pulled.turned,
+    hardTurnSpeed: hard.speed, slowTurn, fastTurn,
+  };
 }
 
 // --- ground is solid ------------------------------------------------------
@@ -452,7 +545,10 @@ function flyMission(w) {
       }
     }
 
-    let pitch = clamp((wantFpa - fpaNow) * 3.5, -1, 1);
+    // Bank no longer turns the aeroplane on its own, so the pilot has to pull
+    // through a turn — roughly in proportion to how hard it is banked.
+    const turnPull = Math.min(0.85, Math.abs(bankNow) * 0.9);
+    let pitch = clamp((wantFpa - fpaNow) * 3.5 + (plane.onGround ? 0 : turnPull), -1, 1);
     let roll = clamp((bankNow - wantBank) * 2.5, -1, 1);
     let throttle = plane.speed < wantSpeed ? 1 : -1;
     let brake = false;
@@ -499,8 +595,10 @@ for (const cfg of LEVELS) {
   checkGround(cfg, build(cfg));
   const phys = checkPhysics(cfg, build(cfg));
   console.log(`  flight  rotate ${phys.takeoffTime.toFixed(1)}s / ${phys.rollDist.toFixed(0)}m`
-    + `  cruise ${phys.cruise.toFixed(0)}  2s turn ${phys.turned.toFixed(2)}rad`
-    + `  held bank ${phys.heldBank.toFixed(2)}rad  stall min ${phys.minSpeed.toFixed(0)}`);
+    + `  cruise ${phys.cruise.toFixed(0)}  stall min ${phys.minSpeed.toFixed(0)}`);
+  console.log(`  turns   45deg bank: ${phys.lazyTurn.toFixed(0)}deg/2s alone, `
+    + `${phys.pulledTurn.toFixed(0)}deg/2s pulling  |  slow ${phys.slowTurn.toFixed(0)} vs fast ${phys.fastTurn.toFixed(0)}deg`
+    + `  |  hard turn ends at ${phys.hardTurnSpeed.toFixed(0)}kt`);
 
   const m = flyMission(build(cfg));
   const verdict = m.crash ? `CRASH: ${m.crash}` : m.hitTower ? 'CRASH: tower'

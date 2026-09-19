@@ -42,6 +42,10 @@ Hold `Shift` to full power, wait for about 55 knots, then pull back on `S`.
 The blue gate is the next one; the arrow at the edge of the screen points to it
 when it is off-screen. Clear them all and the arrow points home.
 
+Bank with `A`/`D`, then **pull back on `S`** to make the turn bite — banking on
+its own will barely change your heading, and the harder you pull the more speed
+you lose. Keep the speed above about 70 kt or the nose will start to sag.
+
 **Gear** takes 1.2 s to travel and only counts as down above 90 % of it. Up, the
 airframe is cleaner — top speed goes from about 131 kt to 153 kt — but you
 cannot land on it: you will belly in, slide, and the run ends there. The chip
@@ -97,15 +101,27 @@ vector. The whole of the aerodynamics is:
 - **Energy.** `speed += (thrust·throttle − drag·v² − gravity·forward.y)·dt`.
   Climbing bleeds speed, diving gains it. `gravity > thrust`, so you cannot
   climb vertically for ever.
-- **Bank-limited roll.** The aileron sets a *bank angle*, not a roll rate:
-  resistance builds as the bank approaches 72°, so holding `D` settles into a
-  steady banked turn instead of barrel-rolling. Releasing it levels the wings.
-  Inverted, the limiter switches off so you can always roll upright.
-- **Coordinated turn.** `ω = turnG · tan(bank) / speed`. Banking turns the
-  nose, and the turn tightens as you slow down — which is both correct and the
-  thing that makes the gates feel threadable.
-- **Stall.** Below 30 knots control authority fades, the nose drops hard and
-  you sink until the speed comes back.
+- **Roll is a rate, with no ceiling.** Hold `A`/`D` and the aeroplane keeps
+  rolling, straight through inverted — about 0.7 s to go over at cruise. Hands
+  off, the wings wash back to level slowly enough (≈10 s from 40°) that you can
+  set a bank and fly a turn on it.
+- **Turning comes from lift, not from bank.** Lift acts out of the top of the
+  wing; whatever part of it ends up horizontal drags the nose round. Banking
+  alone is barely a turn — 45° of bank gives about 8° of heading in two
+  seconds. Pulling is what bends the flight path: the same bank with full
+  back-pressure gives about 175°. Deriving this from the lift vector rather
+  than from a bank angle keeps it correct inverted and at 90° of bank, where
+  an `asin(bank)` formula folds back on itself.
+- **Back-pressure costs speed.** Pull sets a load factor of 1–4 g, rising with
+  the *square* of the input so easing the nose up is nearly free, and induced
+  drag is charged on `n² − 1`. A gentle turn holds speed; a hard one at 50° of
+  bank drops you from 120 kt to about 92 kt in two seconds.
+- **Slow flight goes vague.** Control authority fades with airspeed and the
+  turn rate falls with its *square*, so a 60 kt turn is a third of a 120 kt
+  one. Below 70 kt the wing runs out of margin: the nose sags and you sink,
+  getting worse all the way down. At 45 kt you cannot climb at all. Below
+  30 kt it stalls properly and the nose drops hard enough to beat your own
+  back-pressure.
 - **Gear and nitro** both act on the same two numbers — drag and thrust — so
   they compose with everything above rather than being special-cased.
 
@@ -160,8 +176,12 @@ The game itself needs none of this — it is only so the headless checks can
 import `three`. The suite builds every level and asserts:
 
 - **Flight model** — takeoff roll fits on the runway, it climbs, level cruise
-  settles in a sane band, full aileron turns and *settles at 72°* rather than
-  rolling over, power-off nose-up stalls, and the stall recovers.
+  settles in a sane band, power-off nose-up stalls, and the stall recovers.
+- **Handling** — full aileron rolls inverted inside 2.5 s at 60 and 120 kt;
+  banking alone turns less than 20° in two seconds while pulling turns over
+  four times as far; a gentle turn holds speed and a hard one sheds 20 kt+; a
+  60 kt turn is under 60 % of a 120 kt one and a 45 kt climb loses height; and
+  hands-off wings take between 4 s and 30 s to level.
 - **Brakes, gear and nitro** — braking stops a 100 kt roll inside the runway
   and beats coasting; the gear is faster up, is refused on the ground, and does
   not count as down mid-travel; a gear-up arrival slides instead of landing;
@@ -189,7 +209,8 @@ smoke signal, not a specification.
 - [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
 - [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
 - [ ] Ghost replay of your best run
-- [ ] Optional aerobatic mode that removes the bank limiter
+- [ ] The flight probe was written for the old bank-turns-you model and cannot
+      thread gates under the current one even after learning to pull in turns
 - [ ] Gamepad support via the Gamepad API
 - [ ] Mobile: touch controls and a smaller terrain mesh
 - [ ] More missions, and a seed field so you can generate your own
