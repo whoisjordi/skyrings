@@ -154,6 +154,62 @@ function checkPhysics(cfg, w) {
     ok(p4.speed < p3.speed - 20, `brake barely helps (${p4.speed.toFixed(0)} vs ${p3.speed.toFixed(0)} coasting)`);
   }
 
+  // Gear: retracting must be worth real speed, and only work in the air.
+  {
+    const cruise = (gearDown) => {
+      const p2 = new Plane(cfg.palette);
+      p2.reset(0, 900, 0, 0);
+      p2.onGround = false; p2.clearedRunway = true; p2.airborneFor = 99;
+      p2.speed = 120; p2.throttle = 1; p2.gearDown = gearDown; p2.gearPos = gearDown ? 1 : 0;
+      for (let i = 0; i < 4800; i++) {
+        p2.update(STEP, { pitch: clamp(-p2.forward.y * 3, -1, 1), roll: 0, yaw: 0, throttle: 1, brake: false },
+          { heightAt: () => -1000, airport });
+      }
+      return p2.speed;
+    };
+    const down = cruise(true), up = cruise(false);
+    ok(up > down + 8, `gear up is not faster (${up.toFixed(0)} vs ${down.toFixed(0)})`);
+
+    const onGround = new Plane(cfg.palette);
+    onGround.reset(airport.start.x, airport.surfaceY, airport.start.z, airport.start.heading);
+    ok(!onGround.toggleGear(), 'gear can be retracted while sitting on the runway');
+    ok(onGround.gearDown, 'gear state changed despite the request being refused');
+
+    const flying = new Plane(cfg.palette);
+    flying.reset(0, 900, 0, 0);
+    flying.onGround = false;
+    ok(flying.toggleGear() && !flying.gearDown, 'gear cannot be retracted in the air');
+    // Mid-travel must not count as down: that is what makes it a real decision.
+    for (let i = 0; i < 48; i++) {   // 0.4s of a 1.2s travel
+      flying.update(STEP, { pitch: 0, roll: 0, yaw: 0, throttle: 0, brake: false },
+        { heightAt: () => -1000, airport });
+    }
+    ok(flying.gearPos > 0.05 && flying.gearPos < 0.9,
+      `gear travel is not gradual (pos ${flying.gearPos.toFixed(2)} after 0.4s)`);
+    ok(!flying.gearLocked, 'gear counts as locked while still travelling');
+  }
+
+  // A gear-up arrival slides instead of landing, and cannot complete a mission.
+  {
+    const p2 = new Plane(cfg.palette);
+    p2.reset(airport.center.x, airport.surfaceY + 3, airport.center.z, cfg.runwayHeading ?? 0);
+    p2.onGround = false; p2.clearedRunway = true; p2.airborneFor = 99;
+    p2.speed = 80; p2.gearDown = false; p2.gearPos = 0;
+    let ev = null;
+    for (let i = 0; i < 400 && !ev; i++) {
+      ev = p2.update(STEP, { pitch: -0.05, roll: 0, yaw: 0, throttle: 0, brake: false }, world);
+    }
+    ok(ev && ev.type === 'belly', `gear-up arrival gave ${ev ? ev.type : 'nothing'} instead of a belly slide`);
+    ok(p2.bellySliding && p2.onGround, 'belly arrival did not leave the aeroplane sliding');
+
+    const before = p2.speed;
+    for (let i = 0; i < 120; i++) {
+      p2.update(STEP, { pitch: 0, roll: 0, yaw: 0, throttle: 1, brake: false }, world);
+    }
+    ok(p2.speed < before, 'belly slide does not scrub off speed');
+    ok(p2.position.y >= airport.bellyY - 0.01, 'belly slide sank into the runway');
+  }
+
   // Stall, then recovery.
   let minSpeed = Infinity, stalled = false;
   for (let i = 0; i < 2400; i++) {

@@ -31,6 +31,11 @@ export const TUNE = {
   airbrake: 5,
   clearance: 2.4,      // how close the belly gets before it counts as contact
   waterline: 0.5,      // sea level contact height
+  gearDragFactor: 0.8,   // drag multiplier with the gear up -> ~153kt vs 131
+  gearThrustBonus: 1.1,  // and a little more acceleration to go with it
+  gearTravel: 1.2,       // seconds for the legs to swing
+  gearLockedAt: 0.9,     // gearPos above this counts as down and locked
+  bellyDrag: 26,         // scraping friction during a gear-up slide
   takeoffGrace: 1.0,   // seconds after rotation where the runway can't catch you
   clearedHeight: 15,   // height that counts as genuinely off the runway
 };
@@ -64,7 +69,12 @@ export class Plane {
     this.clearedRunway = false;
     this.dead = false;
     this.propSpin = 0;
+    // 1 = down and locked, 0 = fully retracted; it travels in between.
+    this.gearDown = true;
+    this.gearPos = 1;
+    this.bellySliding = false;
     this._prop = this.object.getObjectByName('prop');
+    this._gear = this.object.getObjectByName('gear');
   }
 
   reset(x, y, z, heading) {
@@ -78,12 +88,30 @@ export class Plane {
     this.airborneFor = 0;
     this.clearedRunway = false;
     this.dead = false;
+    this.gearDown = true;
+    this.gearPos = 1;
+    this.bellySliding = false;
+    this._applyGearVisual();
   }
 
   // Unit vectors in world space, refreshed from the current orientation.
   get forward() { return V.fwd.set(0, 0, -1).applyQuaternion(this.quaternion); }
   get up() { return V.up.set(0, 1, 0).applyQuaternion(this.quaternion); }
   get right() { return V.right.set(1, 0, 0).applyQuaternion(this.quaternion); }
+
+  /** Down AND locked. Mid-travel does not count — you cannot land on it. */
+  get gearLocked() { return this.gearPos >= TUNE.gearLockedAt; }
+
+  /**
+   * Raises or lowers the gear. Refused on the ground: the legs are carrying
+   * the aeroplane, so there is nothing sensible to do with the request.
+   * @returns {boolean} whether the request was accepted
+   */
+  toggleGear() {
+    if (this.onGround) return false;
+    this.gearDown = !this.gearDown;
+    return true;
+  }
 
   /** sin(bank): 0 level, negative banked right. */
   get bank() { return this.right.y; }
@@ -108,6 +136,14 @@ export class Plane {
       ? this._updateGround(dt, ctrl, world)
       : this._updateAir(dt, ctrl, world);
 
+    // Gear swings toward wherever the lever is.
+    const want = this.gearDown ? 1 : 0;
+    const travel = dt / TUNE.gearTravel;
+    this.gearPos = want > this.gearPos
+      ? Math.min(want, this.gearPos + travel)
+      : Math.max(want, this.gearPos - travel);
+    this._applyGearVisual();
+
     // Prop disc spins with power; idle still turns so it never looks frozen.
     this.propSpin += (2 + this.throttle * 46) * dt;
     if (this._prop) this._prop.rotation.z = this.propSpin;
@@ -116,15 +152,19 @@ export class Plane {
   }
 
   _updateGround(dt, ctrl, world) {
-    const rolling = TUNE.thrust * this.throttle
-      - TUNE.drag * this.speed * this.speed
-      - TUNE.groundDrag
-      - (ctrl.brake ? TUNE.brakeDecel : 0);
+    // On the belly there is nothing to roll on and nothing to brake with:
+    // the airframe simply scrubs off speed against the tarmac.
+    const rolling = this.bellySliding
+      ? -TUNE.bellyDrag - TUNE.drag * this.speed * this.speed
+      : TUNE.thrust * this.throttle
+        - TUNE.drag * this.speed * this.speed
+        - TUNE.groundDrag
+        - (ctrl.brake ? TUNE.brakeDecel : 0);
     this.speed = Math.max(0, this.speed + rolling * dt);
 
     // Nosewheel steering: both the roll and rudder keys turn you on the ground.
     const steer = clamp(ctrl.roll + ctrl.yaw, -1, 1);
-    const grip = clamp(this.speed / 45, 0, 1);
+    const grip = clamp(this.speed / 45, 0, 1) * (this.bellySliding ? 0.25 : 1);
     this._rotateLocal(AX.y, -steer * TUNE.groundSteer * grip * dt);
 
     // Settle the airframe flat while it rolls, keeping only the heading.
@@ -134,12 +174,16 @@ export class Plane {
 
     const ap = world.airport;
     this.position.addScaledVector(this.forward, this.speed * dt);
-    this.position.y = ap.surfaceY;
+    this.position.y = this.bellySliding ? ap.bellyY : ap.surfaceY;
+    this._prevPos.copy(this.position);
     this.velocity.copy(this.forward).multiplyScalar(this.speed);
 
     if (!ap.contains(this.position.x, this.position.z)) {
       return { type: 'crash', reason: 'Ran off the runway' };
     }
+    // Nothing to rotate on once you are sliding on the airframe.
+    if (this.bellySliding) return null;
+
     // Rotate: enough speed plus back pressure and the wheels leave the ground.
     if (ctrl.pitch > 0 && this.speed >= TUNE.rotateSpeed) {
       this.onGround = false;
@@ -154,8 +198,14 @@ export class Plane {
     this.airborneFor += dt;
     const fwdY = this.forward.y;
 
-    const accel = TUNE.thrust * this.throttle
-      - TUNE.drag * this.speed * this.speed
+    // Tucking the legs away is worth both a cleaner airframe and a little
+    // more push; the benefit fades in as the gear travels.
+    const tuck = 1 - this.gearPos;
+    const drag = TUNE.drag * (1 - tuck * (1 - TUNE.gearDragFactor));
+    const thrust = TUNE.thrust * (1 + tuck * (TUNE.gearThrustBonus - 1));
+
+    const accel = thrust * this.throttle
+      - drag * this.speed * this.speed
       - TUNE.gravity * fwdY
       - (ctrl.brake ? TUNE.airbrake : 0);
     this.speed = clamp(this.speed + accel * dt, 0, TUNE.maxSpeed);
@@ -275,9 +325,28 @@ export class Plane {
   /** Called by the airport once a touchdown has been accepted. */
   settleOnRunway(surfaceY) {
     this.onGround = true;
+    this.bellySliding = false;
     this.position.y = surfaceY;
     this._prevPos.copy(this.position);
     this.velocity.y = 0;
+  }
+
+  /** Called by the airport when the aeroplane arrives with the gear up. */
+  settleOnBelly(bellyY) {
+    this.onGround = true;
+    this.bellySliding = true;
+    this.throttle = 0;
+    this.position.y = bellyY;
+    this._prevPos.copy(this.position);
+    this.velocity.y = 0;
+  }
+
+  _applyGearVisual() {
+    if (!this._gear) return;
+    const p = this.gearPos;
+    this._gear.visible = p > 0.02;
+    this._gear.position.y = (1 - p) * 1.9;   // swings up into the wing root
+    this._gear.scale.setScalar(0.15 + 0.85 * p);
   }
 }
 
@@ -337,18 +406,21 @@ function buildModel(palette) {
   wing.position.set(0, 0.25, 0.2);
   g.add(wing);
 
+  const gear = new THREE.Group();
+  gear.name = 'gear';
   for (const s of [-1, 1]) {
     const tip = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.34, 2.2), accent);
     tip.position.set(s * 8, 0.25, 0.2);
     g.add(tip);
     const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.6, 5), dark);
     strut.position.set(s * 3.2, -1.3, 0.4);
-    g.add(strut);
+    gear.add(strut);
     const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.3, 8), dark);
     wheel.rotation.z = Math.PI / 2;
     wheel.position.set(s * 3.2, -2.1, 0.4);
-    g.add(wheel);
+    gear.add(wheel);
   }
+  g.add(gear);
 
   const tailplane = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.28, 1.7), body);
   tailplane.position.set(0, 0.5, 3.6);

@@ -15,6 +15,7 @@ const el = {
   thrFill: $('thr-fill'),
   thrPct: $('thr-pct'),
   level: $('lvl-name'),
+  gear: $('gear-chip'),
   arrow: $('arrow'),
   banner: $('banner'),
   stall: $('stall'),
@@ -40,6 +41,13 @@ export const HUD = {
     const pct = Math.round(s.throttle * 100);
     el.thrFill.style.width = `${pct}%`;
     el.thrPct.textContent = `${pct}%`;
+
+    // Gear: only "down and locked" is safe to land on, so mid-travel reads
+    // as a warning rather than as down.
+    const locked = s.gearPos >= 0.9;
+    const retracted = s.gearPos <= 0.02;
+    el.gear.textContent = locked ? 'GEAR DOWN' : retracted ? 'GEAR UP' : 'GEAR …';
+    el.gear.className = `chip ${locked ? 'good' : retracted ? 'bad' : 'warn'}`;
 
     el.stall.classList.toggle('on', !!s.stalling);
   },

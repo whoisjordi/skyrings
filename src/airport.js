@@ -8,6 +8,7 @@ const WIDTH = 70;
 const SLAB = 0.8;                 // runway thickness
 const TOP_Y = AIRPORT_Y + SLAB / 2;
 const WHEEL_DROP = 2.4;           // model centre sits this far above the wheels
+const BELLY_DROP = 1.1;           // with the legs tucked away it sits lower
 const SIDE_MARGIN = 14;           // grace before "ran off the runway"
 
 // What counts as an acceptable arrival. Generous on purpose — the challenge
@@ -123,6 +124,8 @@ export function createAirport(cfg) {
     axis,
     /** Height the plane's origin rests at while on the ground. */
     surfaceY: TOP_Y + WHEEL_DROP,
+    /** ...and where it rests when sliding on the airframe instead. */
+    bellyY: TOP_Y + BELLY_DROP,
     start,
     center: new THREE.Vector3(ax, TOP_Y, az),
 
@@ -150,6 +153,13 @@ export function createAirport(cfg) {
       if (Math.abs(plane.bank) > LIMITS.bank) return crash('Wing strike on landing');
       if (plane.forward.y < LIMITS.noseDown) return crash('Nosed into the runway');
       if (align < LIMITS.align) return crash('Landed across the runway');
+
+      // Arriving on the airframe is survivable but it is not a landing: you
+      // slide, and the mission ends there. Gear mid-travel counts as up.
+      if (!plane.gearLocked) {
+        plane.settleOnBelly(TOP_Y + BELLY_DROP);
+        return { type: 'belly' };
+      }
 
       plane.settleOnRunway(TOP_Y + WHEEL_DROP);
       return { type: 'touchdown' };

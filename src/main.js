@@ -102,7 +102,7 @@ function resetRun() {
   level.rings = new RingSet(cfg, level.gates);
   level.root.add(level.rings.group);
 
-  run = { time: 0, outcome: null, reason: '', landed: false, warned: false };
+  run = { time: 0, outcome: null, reason: '', landed: false, bellied: false, warned: false };
   chase.snap();
   HUD.clearBanner();
 }
@@ -153,6 +153,11 @@ function step(dt) {
     run.warned = false;
   }
 
+  // A gear-up arrival ends the run once the sliding stops.
+  if (run.bellied && plane.onGround && plane.speed < STOPPED) {
+    return fail('Landed with the gear up');
+  }
+
   // Rollout after a valid landing with every gate cleared.
   if (run.landed && plane.onGround && plane.speed < STOPPED) succeed();
 }
@@ -165,6 +170,14 @@ function handleEvent(event) {
   if (event.type === 'takeoff') {
     run.landed = false;
     HUD.banner('Airborne', '', 1.2);
+    return;
+  }
+
+  if (event.type === 'belly') {
+    run.bellied = true;
+    HUD.banner('Gear up — sliding', 'bad', 4);
+    chase.shake(1.1);
+    Audio.crash();
     return;
   }
 
@@ -233,6 +246,8 @@ function frame(now) {
       speed: plane.speed,
       altitude: plane.position.y,
       throttle: plane.throttle,
+      gearPos: plane.gearPos,
+      gearDown: plane.gearDown,
       time: run.time,
       rings: rings.index,
       total: rings.total,
@@ -243,6 +258,13 @@ function frame(now) {
     HUD.updateArrow(rings.done ? airport.center : rings.next.position, camera);
     HUD.tickBanner();
 
+    if (Input.tapped('KeyG')) {
+      if (plane.toggleGear()) {
+        HUD.banner(plane.gearDown ? 'Gear down' : 'Gear up', '', 1.4);
+      } else {
+        HUD.banner('Gear is locked down on the ground', 'warn', 1.6);
+      }
+    }
     if (Input.tapped('KeyC')) chase.toggle();
     if (Input.tapped('KeyR')) resetRun();
     if (Input.tapped('Escape') || Input.tapped('KeyP')) pause();

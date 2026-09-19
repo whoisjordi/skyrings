@@ -46,6 +46,13 @@
   #thr-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--good));
     transition:width .08s linear}
 
+  .chip{display:inline-block;margin-top:8px;padding:3px 8px;border-radius:6px;
+    font-size:10px;letter-spacing:.14em;border:1px solid var(--edge);
+    background:rgba(255,255,255,.05);color:var(--dim)}
+  .chip.good{color:var(--good);border-color:rgba(122,229,130,.5)}
+  .chip.warn{color:var(--warn);border-color:rgba(255,204,85,.5)}
+  .chip.bad{color:var(--bad);border-color:rgba(255,107,107,.55)}
+
   /* centre reticle */
   #reticle{position:absolute;left:50%;top:50%;width:42px;height:42px;translate:-50% -50%;
     opacity:.5}
@@ -146,6 +153,7 @@
   <div class="cluster bl">
     <div class="lbl">THROTTLE <span id="thr-pct">0%</span></div>
     <div id="thr-bar"><div id="thr-fill"></div></div>
+    <div class="chip" id="gear-chip">GEAR DOWN</div>
   </div>
 
   <div class="cluster br">
@@ -173,6 +181,7 @@
       <div><span>Roll</span><span><kbd>A</kbd><kbd>D</kbd></span></div>
       <div><span>Rudder</span><span><kbd>Q</kbd><kbd>E</kbd></span></div>
       <div><span>Brakes</span><span><kbd>B</kbd></span></div>
+      <div><span>Gear up/down</span><span><kbd>G</kbd></span></div>
       <div><span>Camera</span><span><kbd>C</kbd></span></div>
       <div><span>Restart</span><span><kbd>R</kbd></span></div>
       <div><span>Pause</span><span><kbd>Esc</kbd></span></div>
