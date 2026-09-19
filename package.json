@@ -1,0 +1,14 @@
+{
+  "name": "skyrings",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Low-poly arcade flight game: take off, fly the gates, land.",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node test/harness.mjs"
+  },
+  "devDependencies": {
+    "three": "0.186.0"
+  }
+}
