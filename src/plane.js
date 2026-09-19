@@ -19,7 +19,8 @@ export const TUNE = {
   pitchRate: 1.0,      // rad/s at full deflection
   rollRate: 2.2,
   yawRate: 0.5,
-  turnG: 12,           // how hard horizontal lift pulls the nose round
+  turnBank: 22,        // lift coupling at 1g: how much a bank alone bends the path
+  turnLoad: 9,         // extra coupling per g of back-pressure
   pullLoad: 3,         // back-pressure raises the load factor to 1..4g (as pull^2)
   turnDrag: 0.7,       // induced drag, paid on load^2 - this is what makes a
                        // hard turn expensive and a gentle one nearly free
@@ -349,7 +350,10 @@ export class Plane {
     const lateral = up.x * fhz - up.z * fhx;   // horizontal lift, left positive
 
     // authority^2, so a slow aeroplane turns lazily as well as vaguely.
-    const rate = (TUNE.turnG * load * lateral * authority * authority)
+    // Split into a 1g term and a per-g term so the two can be tuned apart:
+    // how much a bank alone turns you, and how much pulling adds to it.
+    const coupling = TUNE.turnBank + TUNE.turnLoad * (load - 1);
+    const rate = (coupling * lateral * authority * authority)
       / Math.max(this.speed, 30);
     return clamp(rate, -TUNE.maxTurnRate, TUNE.maxTurnRate);
   }
