@@ -13,6 +13,7 @@ const LOOK_AHEAD = 26;
 
 const BASE_FOV = 66;
 const MAX_FOV = 82;   // creeps up with speed so fast feels fast
+const NITRO_FOV = 9;  // extra punch while the boost is lit
 
 export class ChaseCamera {
   constructor(camera) {
@@ -36,7 +37,7 @@ export class ChaseCamera {
 
   snap() { this._started = false; }
 
-  update(dt, plane, speedRatio) {
+  update(dt, plane, speedRatio, boost = 0) {
     const cam = this.camera;
     const q = plane.quaternion;
 
@@ -75,7 +76,8 @@ export class ChaseCamera {
       this._shake *= Math.exp(-4 * dt);
     }
 
-    const wantFov = BASE_FOV + (MAX_FOV - BASE_FOV) * Math.min(1, speedRatio);
+    const wantFov = BASE_FOV + (MAX_FOV - BASE_FOV) * Math.min(1, speedRatio)
+      + NITRO_FOV * boost;
     cam.fov += (wantFov - cam.fov) * (1 - Math.exp(-3 * dt));
     cam.updateProjectionMatrix();
   }

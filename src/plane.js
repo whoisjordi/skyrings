@@ -40,6 +40,18 @@ export const TUNE = {
   clearedHeight: 15,   // height that counts as genuinely off the runway
 };
 
+// Nitro. The multiplier is on THRUST, not on speed: tripling the speed
+// outright would put the aeroplane at ~390kt, far too fast to thread a gate or
+// to stop before the end of the runway. Tripling the push gives a hard, very
+// visible surge to roughly 1.7x cruise, which is the part that feels good.
+export const NITRO = {
+  thrustMult: 3,
+  speedCapMult: 1.45,  // the ordinary ceiling would otherwise swallow the boost
+  duration: 5,
+  cooldown: 10,
+  ramp: 0.45,          // seconds to blend in and out, so it never snaps on
+};
+
 const V = {
   fwd: new THREE.Vector3(),
   up: new THREE.Vector3(),
@@ -73,6 +85,9 @@ export class Plane {
     this.gearDown = true;
     this.gearPos = 1;
     this.bellySliding = false;
+    this.nitroTime = 0;       // seconds of boost left
+    this.nitroCooldown = 0;   // seconds until it can be used again
+    this.nitroBlend = 0;      // smoothed 0..1 actually applied
     this._prop = this.object.getObjectByName('prop');
     this._gear = this.object.getObjectByName('gear');
   }
@@ -91,6 +106,9 @@ export class Plane {
     this.gearDown = true;
     this.gearPos = 1;
     this.bellySliding = false;
+    this.nitroTime = 0;
+    this.nitroCooldown = 0;
+    this.nitroBlend = 0;
     this._applyGearVisual();
   }
 
@@ -98,6 +116,22 @@ export class Plane {
   get forward() { return V.fwd.set(0, 0, -1).applyQuaternion(this.quaternion); }
   get up() { return V.up.set(0, 1, 0).applyQuaternion(this.quaternion); }
   get right() { return V.right.set(1, 0, 0).applyQuaternion(this.quaternion); }
+
+  get nitroActive() { return this.nitroTime > 0; }
+  get nitroReady() { return this.nitroTime <= 0 && this.nitroCooldown <= 0; }
+
+  /**
+   * Fires the boost if it is charged.
+   * @returns {boolean} whether it lit
+   */
+  fireNitro() {
+    if (!this.nitroReady) return false;
+    this.nitroTime = NITRO.duration;
+    return true;
+  }
+
+  /** Thrust multiplier from the boost, ramped rather than switched. */
+  get _boost() { return 1 + this.nitroBlend * (NITRO.thrustMult - 1); }
 
   /** Down AND locked. Mid-travel does not count — you cannot land on it. */
   get gearLocked() { return this.gearPos >= TUNE.gearLockedAt; }
@@ -136,6 +170,16 @@ export class Plane {
       ? this._updateGround(dt, ctrl, world)
       : this._updateAir(dt, ctrl, world);
 
+    // Burn, then recharge. The cooldown only starts once the burn is spent.
+    if (this.nitroTime > 0) {
+      this.nitroTime = Math.max(0, this.nitroTime - dt);
+      if (this.nitroTime === 0) this.nitroCooldown = NITRO.cooldown;
+    } else if (this.nitroCooldown > 0) {
+      this.nitroCooldown = Math.max(0, this.nitroCooldown - dt);
+    }
+    const wantBlend = this.nitroTime > 0 ? 1 : 0;
+    this.nitroBlend += clamp(wantBlend - this.nitroBlend, -dt / NITRO.ramp, dt / NITRO.ramp);
+
     // Gear swings toward wherever the lever is.
     const want = this.gearDown ? 1 : 0;
     const travel = dt / TUNE.gearTravel;
@@ -156,7 +200,7 @@ export class Plane {
     // the airframe simply scrubs off speed against the tarmac.
     const rolling = this.bellySliding
       ? -TUNE.bellyDrag - TUNE.drag * this.speed * this.speed
-      : TUNE.thrust * this.throttle
+      : TUNE.thrust * this.throttle * this._boost
         - TUNE.drag * this.speed * this.speed
         - TUNE.groundDrag
         - (ctrl.brake ? TUNE.brakeDecel : 0);
@@ -202,13 +246,16 @@ export class Plane {
     // more push; the benefit fades in as the gear travels.
     const tuck = 1 - this.gearPos;
     const drag = TUNE.drag * (1 - tuck * (1 - TUNE.gearDragFactor));
-    const thrust = TUNE.thrust * (1 + tuck * (TUNE.gearThrustBonus - 1));
+    const thrust = TUNE.thrust * (1 + tuck * (TUNE.gearThrustBonus - 1)) * this._boost;
 
     const accel = thrust * this.throttle
       - drag * this.speed * this.speed
       - TUNE.gravity * fwdY
       - (ctrl.brake ? TUNE.airbrake : 0);
-    this.speed = clamp(this.speed + accel * dt, 0, TUNE.maxSpeed);
+
+    // The boost needs headroom above the ordinary ceiling to be worth anything.
+    const cap = TUNE.maxSpeed * (1 + this.nitroBlend * (NITRO.speedCapMult - 1));
+    this.speed = clamp(this.speed + accel * dt, 0, cap);
 
     // Controls go soft as the airflow dies, which is what makes a stall read.
     const authority = clamp((this.speed - 10) / 48, 0.12, 1);

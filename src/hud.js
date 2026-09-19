@@ -16,6 +16,7 @@ const el = {
   thrPct: $('thr-pct'),
   level: $('lvl-name'),
   gear: $('gear-chip'),
+  nitro: $('nitro-chip'),
   arrow: $('arrow'),
   banner: $('banner'),
   stall: $('stall'),
@@ -48,6 +49,17 @@ export const HUD = {
     const retracted = s.gearPos <= 0.02;
     el.gear.textContent = locked ? 'GEAR DOWN' : retracted ? 'GEAR UP' : 'GEAR …';
     el.gear.className = `chip ${locked ? 'good' : retracted ? 'bad' : 'warn'}`;
+
+    if (s.nitroActive) {
+      el.nitro.textContent = `NITRO ${s.nitroTime.toFixed(1)}s`;
+      el.nitro.className = 'chip bad';
+    } else if (s.nitroCooldown > 0) {
+      el.nitro.textContent = `NITRO ${Math.ceil(s.nitroCooldown)}s`;
+      el.nitro.className = 'chip';
+    } else {
+      el.nitro.textContent = 'NITRO READY';
+      el.nitro.className = 'chip good';
+    }
 
     el.stall.classList.toggle('on', !!s.stalling);
   },

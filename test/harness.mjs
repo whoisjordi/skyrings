@@ -11,7 +11,7 @@ import { createTerrain, AIRPORT_Y, WORLD_SIZE } from '../src/terrain.js';
 import { createAirport } from '../src/airport.js';
 import { buildRoute, RingSet } from '../src/rings.js';
 import { createCity } from '../src/scenery.js';
-import { Plane, TUNE } from '../src/plane.js';
+import { Plane, TUNE, NITRO } from '../src/plane.js';
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -208,6 +208,49 @@ function checkPhysics(cfg, w) {
     }
     ok(p2.speed < before, 'belly slide does not scrub off speed');
     ok(p2.position.y >= airport.bellyY - 0.01, 'belly slide sank into the runway');
+  }
+
+  // Nitro: a real surge, for exactly as long as advertised, then a cooldown.
+  {
+    const air = { heightAt: () => -1000, airport };
+    const level = (p2) => ({ pitch: clamp(-p2.forward.y * 3, -1, 1), roll: 0, yaw: 0, throttle: 1, brake: false });
+    const fly = (p2, seconds) => {
+      for (let i = 0; i < seconds * 120; i++) p2.update(STEP, level(p2), air);
+    };
+    const make = () => {
+      const p2 = new Plane(cfg.palette);
+      p2.reset(0, 900, 0, 0);
+      p2.onGround = false; p2.clearedRunway = true; p2.airborneFor = 99;
+      p2.speed = 126; p2.throttle = 1;
+      return p2;
+    };
+
+    const plain = make(); fly(plain, 5);
+    const boosted = make();
+    ok(boosted.fireNitro(), 'nitro refuses to fire when charged');
+    fly(boosted, 5);
+    ok(boosted.speed > plain.speed + 30,
+      `nitro barely accelerates (${boosted.speed.toFixed(0)} vs ${plain.speed.toFixed(0)})`);
+
+    // It must not be re-armed while burning, and must expire on schedule.
+    ok(!boosted.fireNitro(), 'nitro can be re-fired while already burning');
+    ok(!boosted.nitroActive, `nitro still burning after ${NITRO.duration}s`);
+    ok(boosted.nitroCooldown > 0 && !boosted.nitroReady, 'nitro is ready again immediately after burning');
+
+    // Still recharging one second short of the cooldown...
+    fly(boosted, NITRO.cooldown - 1);
+    ok(!boosted.nitroReady, 'nitro recharged early');
+    // ...and ready once it has fully elapsed.
+    fly(boosted, 1.2);
+    ok(boosted.nitroReady, `nitro never recharged (${boosted.nitroCooldown.toFixed(1)}s left)`);
+    ok(boosted.fireNitro(), 'recharged nitro will not fire');
+
+    // The ramp is what makes it smooth rather than a step change.
+    const ramping = make();
+    ramping.fireNitro();
+    ramping.update(STEP, level(ramping), air);
+    ok(ramping.nitroBlend > 0 && ramping.nitroBlend < 0.2,
+      `nitro snaps on instead of ramping (blend ${ramping.nitroBlend.toFixed(2)})`);
   }
 
   // Stall, then recovery.

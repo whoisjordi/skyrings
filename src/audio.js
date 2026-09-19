@@ -132,6 +132,43 @@ export const Audio = {
     src.start(t);
   },
 
+  /** Boost: a swept noise whoosh under a rising tone. */
+  nitro() {
+    const c = ensure();
+    if (!c || !enabled) return;
+    const t = c.currentTime;
+
+    const len = Math.floor(c.sampleRate * 1.1);
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(260, t);
+    bp.frequency.exponentialRampToValueAtTime(2600, t + 0.85);
+    const ng = c.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.42, t + 0.18);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 1.05);
+    src.connect(bp); bp.connect(ng); ng.connect(master);
+    src.start(t);
+
+    const o = c.createOscillator();
+    const og = c.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(110, t);
+    o.frequency.exponentialRampToValueAtTime(420, t + 0.8);
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.16, t + 0.15);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 1);
+    o.connect(og); og.connect(master);
+    o.start(t);
+    o.stop(t + 1.2);
+  },
+
   /** Rising arpeggio on a completed mission. */
   fanfare() {
     const c = ensure();
