@@ -31,7 +31,9 @@ The design brief was deliberately narrow:
 | `A` / `D` | Roll left / right |
 | `Q` / `E` | Rudder |
 | `Shift` / `Ctrl` | Throttle up / down |
-| `Space` | Brakes on the ground, airbrake in the air |
+| `B` | Wheel brakes on the ground, airbrake in the air (`Space` also works) |
+| `G` | Landing gear up / down |
+| `N` | Nitro boost |
 | `C` | Chase / cockpit camera |
 | `R` | Restart mission |
 | `Esc` | Pause |
@@ -39,6 +41,16 @@ The design brief was deliberately narrow:
 Hold `Shift` to full power, wait for about 55 knots, then pull back on `S`.
 The blue gate is the next one; the arrow at the edge of the screen points to it
 when it is off-screen. Clear them all and the arrow points home.
+
+**Gear** takes 1.2 s to travel and only counts as down above 90 % of it. Up, the
+airframe is cleaner — top speed goes from about 131 kt to 153 kt — but you
+cannot land on it: you will belly in, slide, and the run ends there. The chip
+at the bottom left is green when it is safe to land.
+
+**Nitro** triples thrust for 5 s and then recharges for 10 s. It is a thrust
+multiplier rather than a speed multiplier: 129 → 205 kt with the gear down,
+143 → 232 kt with it up. Tripling the *speed* outright would be near 390 kt,
+which is too fast to thread a gate or stop before the end of the runway.
 
 ## Running it locally
 
@@ -73,6 +85,10 @@ src/levels.js   the four missions as data
 test/harness.mjs headless checks — see "Tests"
 ```
 
+> **Testing note:** every mission is currently selectable regardless of
+> progress. Set `UNLOCK_ALL` to `false` in `src/save.js` to restore
+> unlock-as-you-go; progress is recorded either way.
+
 ### The flight model
 
 Not a simulation. Speed is a single scalar along the nose and there is no lift
@@ -90,6 +106,13 @@ vector. The whole of the aerodynamics is:
   thing that makes the gates feel threadable.
 - **Stall.** Below 30 knots control authority fades, the nose drops hard and
   you sink until the speed comes back.
+- **Gear and nitro** both act on the same two numbers — drag and thrust — so
+  they compose with everything above rather than being special-cased.
+
+Ground contact is swept along the path travelled each step rather than tested
+at the end point alone, so a fast aeroplane cannot cross the surface between
+frames. Every outcome — landing, crash, or contact that is neither — snaps the
+aeroplane onto the surface; nothing may leave it underground.
 
 Physics runs on a fixed 1/120 s step with an accumulator, so a recorded time
 means the same thing on a 60 Hz laptop and a 144 Hz monitor.
@@ -139,6 +162,14 @@ import `three`. The suite builds every level and asserts:
 - **Flight model** — takeoff roll fits on the runway, it climbs, level cruise
   settles in a sane band, full aileron turns and *settles at 72°* rather than
   rolling over, power-off nose-up stalls, and the stall recovers.
+- **Brakes, gear and nitro** — braking stops a 100 kt roll inside the runway
+  and beats coasting; the gear is faster up, is refused on the ground, and does
+  not count as down mid-travel; a gear-up arrival slides instead of landing;
+  nitro surges, cannot be re-armed mid-burn, expires on time and recharges on
+  time.
+- **Solid ground** — diving into terrain at top speed, planting it on the
+  runway from 500 units up, and descending onto the runway before ever having
+  climbed away all leave the aeroplane on the surface, never inside it.
 - **Worlds** — the apron is flat, the start point is on the runway, gates clear
   the terrain and sit inside the map, and every route leg clears the ground.
 - **Gate detection** — dead centre registers, just inside the rim registers,
@@ -150,10 +181,13 @@ smoke signal, not a specification.
 
 ## TODO
 
+- [ ] Turn `UNLOCK_ALL` back off once mission testing is done
 - [ ] The flight probe cannot thread gates reliably; it needs proper pursuit
       guidance before its score could become a real assertion
 - [ ] Landing is the hardest part to learn — add a vertical-speed readout and
       an approach hint ("too fast", "too steep") once the gates are cleared
+- [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
+- [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
 - [ ] Ghost replay of your best run
 - [ ] Optional aerobatic mode that removes the bank limiter
 - [ ] Gamepad support via the Gamepad API
