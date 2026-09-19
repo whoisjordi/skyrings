@@ -408,8 +408,10 @@ function buildLevelList() {
 // Wiring
 // ---------------------------------------------------------------------------
 $('btn-play').addEventListener('click', () => {
-  // Fly the furthest mission the player has unlocked.
-  startLevel(Math.min(LEVELS.length - 1, Math.max(0, unlockedCount() - 1)));
+  // Pick up at the furthest mission actually reached, not the furthest
+  // selectable one — otherwise the testing unlock drops you straight into the
+  // hardest mission on a fresh save.
+  startLevel(Math.min(LEVELS.length - 1, Math.max(0, Save.reachedCount() - 1)));
 });
 $('btn-levels').addEventListener('click', () => { Audio.unlock(); toMenu(); });
 $('btn-back').addEventListener('click', () => { state = 'menu'; showScreen('title'); });
@@ -423,12 +425,6 @@ $('btn-invert').addEventListener('click', (e) => {
   Save.invertPitch = !Save.invertPitch;
   e.target.textContent = Save.invertPitch ? 'ON' : 'OFF';
 });
-
-function unlockedCount() {
-  let n = 0;
-  while (n < LEVELS.length && Save.isUnlocked(n)) n++;
-  return n;
-}
 
 // Don't let the aeroplane fly on while the tab is hidden.
 addEventListener('visibilitychange', () => { if (document.hidden) pause(); });

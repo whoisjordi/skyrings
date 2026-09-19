@@ -2,6 +2,11 @@
 // blocked site-data make these throw, and the game must still be playable.
 
 const KEY = 'skyrings.v1';
+
+// TEMPORARY, for testing: every mission is selectable regardless of progress.
+// Set back to false to restore unlock-as-you-go. Progress is still recorded
+// either way, so flipping this does not throw away anyone's unlocks.
+const UNLOCK_ALL = true;
 const EMPTY = { best: {}, unlocked: 1, invertPitch: false };
 
 let state = load();
@@ -32,7 +37,10 @@ export const Save = {
     return isBest;
   },
 
-  isUnlocked: (index) => index < state.unlocked,
+  isUnlocked: (index) => UNLOCK_ALL || index < state.unlocked,
+
+  /** How far the player has genuinely got, ignoring the testing unlock. */
+  reachedCount: () => state.unlocked,
 
   unlockThrough(index) {
     if (index + 1 > state.unlocked) {
