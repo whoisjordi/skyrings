@@ -140,6 +140,63 @@ function checkPhysics(cfg, w) {
   return { takeoffTime: t, rollDist, cruise, turned, minSpeed, heldBank };
 }
 
+// --- ground is solid ------------------------------------------------------
+// Whatever happens, the aeroplane must never come to rest inside the scenery.
+function checkGround(cfg, w) {
+  const { terrain, airport } = w;
+  const world = { heightAt: terrain.heightAt, airport };
+
+  const floorAt = (x, z) => (airport.contains(x, z)
+    ? airport.surfaceY
+    : Math.max(terrain.heightAt(x, z), 0));
+
+  const dive = (label, opts) => {
+    const plane = new Plane(cfg.palette);
+    plane.reset(opts.x, opts.y, opts.z, opts.heading ?? 0);
+    plane.onGround = false;
+    plane.clearedRunway = true;
+    plane.airborneFor = 99;
+    plane.speed = opts.speed;
+    plane.throttle = 1;
+
+    let worst = Infinity;
+    for (let i = 0; i < 4000; i++) {
+      const ev = plane.update(STEP, { pitch: opts.pitch, roll: 0, yaw: 0, throttle: 0, brake: false }, world);
+      const below = plane.position.y - floorAt(plane.position.x, plane.position.z);
+      worst = Math.min(worst, below);
+      if (ev && (ev.type === 'crash' || ev.type === 'touchdown')) break;
+    }
+    // A small tolerance: the origin sits above the wheels, so resting on the
+    // surface reads as a positive gap, never a negative one.
+    ok(worst > -0.5, `${label}: ended up ${(-worst).toFixed(1)} below the surface`);
+    return worst;
+  };
+
+  // Steep dive into open terrain at high speed — the tunnelling case.
+  dive('terrain dive', { x: 0, y: 900, z: 0, speed: TUNE.maxSpeed, pitch: -1 });
+
+  // Straight down onto the runway.
+  dive('runway plant', {
+    x: airport.center.x, y: airport.center.y + 500, z: airport.center.z,
+    heading: cfg.runwayHeading ?? 0, speed: 150, pitch: -1,
+  });
+
+  // Sinking onto the runway before ever having climbed away: the aeroplane
+  // must be stopped by the tarmac even though this cannot count as a landing.
+  const plane = new Plane(cfg.palette);
+  plane.reset(airport.start.x, airport.surfaceY + 6, airport.start.z, airport.start.heading);
+  plane.onGround = false;
+  plane.clearedRunway = false;
+  plane.airborneFor = 0;
+  plane.speed = 60;
+  let lowest = Infinity;
+  for (let i = 0; i < 600; i++) {
+    plane.update(STEP, { pitch: -0.2, roll: 0, yaw: 0, throttle: 0, brake: false }, world);
+    lowest = Math.min(lowest, plane.position.y - airport.surfaceY);
+  }
+  ok(lowest > -0.5, `un-armed descent sank ${(-lowest).toFixed(1)} through the runway`);
+}
+
 // --- gate detection --------------------------------------------------------
 function checkGates(cfg, w) {
   const { gates, airport, terrain } = w;
@@ -310,6 +367,7 @@ for (const cfg of LEVELS) {
     + `  min gap ${world.minGap.toFixed(0)}  tightest leg ${world.worstSeg.toFixed(0)} (leg ${world.worstAt})`);
 
   checkGates(cfg, build(cfg));
+  checkGround(cfg, build(cfg));
   const phys = checkPhysics(cfg, build(cfg));
   console.log(`  flight  rotate ${phys.takeoffTime.toFixed(1)}s / ${phys.rollDist.toFixed(0)}m`
     + `  cruise ${phys.cruise.toFixed(0)}  2s turn ${phys.turned.toFixed(2)}rad`

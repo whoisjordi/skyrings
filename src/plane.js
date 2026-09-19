@@ -30,6 +30,7 @@ export const TUNE = {
   brakeDecel: 16,
   airbrake: 5,
   clearance: 2.4,      // how close the belly gets before it counts as contact
+  waterline: 0.5,      // sea level contact height
   takeoffGrace: 1.0,   // seconds after rotation where the runway can't catch you
   clearedHeight: 15,   // height that counts as genuinely off the runway
 };
@@ -55,6 +56,7 @@ export class Plane {
     this.position = this.object.position;
     this.quaternion = this.object.quaternion;
     this.velocity = new THREE.Vector3();
+    this._prevPos = new THREE.Vector3();
     this.speed = 0;
     this.throttle = 0;
     this.onGround = true;
@@ -67,6 +69,7 @@ export class Plane {
 
   reset(x, y, z, heading) {
     this.position.set(x, y, z);
+    this._prevPos.set(x, y, z);
     this.quaternion.setFromAxisAngle(AX.y, heading);
     this.velocity.set(0, 0, 0);
     this.speed = 0;
@@ -206,36 +209,65 @@ export class Plane {
 
     this.velocity.copy(this.forward).multiplyScalar(this.speed);
     this.velocity.y -= sink;
+    this._prevPos.copy(this.position);
     this.position.addScaledVector(this.velocity, dt);
 
     return this._checkContact(world);
   }
 
+  /**
+   * Resolves ground contact over the path travelled this step.
+   *
+   * Sweeping rather than testing the end point alone matters twice over: a
+   * fast aeroplane can cross several units in a frame, and — whatever the
+   * outcome — the aeroplane is snapped onto the surface rather than left
+   * inside it. Nothing in here may exit leaving the aeroplane underground.
+   */
   _checkContact(world) {
-    const { x, y, z } = this.position;
     const ap = world.airport;
+    const from = this._prevPos;
+    const to = this.position;
 
-    if (ap.contains(x, z)) {
-      const gap = y - ap.surfaceY;
-      if (gap > TUNE.clearedHeight) this.clearedRunway = true;
+    const steps = Math.max(1, Math.ceil(from.distanceTo(to) / 2));
+    let x = to.x, y = to.y, z = to.z;
 
-      // You cannot land until you have actually left. Without this, the frames
-      // just after rotation — wheels a hair off the tarmac, wing coming up
-      // into the first turn — are judged as an arrival and score a wing strike.
-      if (!this.clearedRunway || this.airborneFor < TUNE.takeoffGrace) return null;
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      x = from.x + (to.x - from.x) * t;
+      y = from.y + (to.y - from.y) * t;
+      z = from.z + (to.z - from.z) * t;
 
-      // Below the surface is always a contact. Above it, only while
-      // descending, so a low pass down the runway isn't judged as one.
-      if (gap <= 0 || (gap <= TUNE.clearance && this.velocity.y < 0)) {
+      if (ap.contains(x, z)) {
+        const gap = y - ap.surfaceY;
+        if (gap > TUNE.clearedHeight) this.clearedRunway = true;
+        if (gap > TUNE.clearance) continue;
+        if (gap > 0 && this.velocity.y >= 0) continue; // low pass, still flying
+
+        // The tarmac is solid whether or not this counts as a landing.
+        if (gap <= 0) {
+          this.position.set(x, ap.surfaceY, z);
+          this.velocity.y = 0;
+        }
+
+        // You cannot land until you have actually left. Without this, the
+        // frames just after rotation — wheels a hair off the tarmac, wing
+        // coming up into the first turn — are judged as an arrival.
+        if (!this.clearedRunway || this.airborneFor < TUNE.takeoffGrace) return null;
         return ap.evaluateTouchdown(this);
       }
-      return null;
-    }
-    if (y <= 0.5) return { type: 'crash', reason: 'Ditched in the sea' };
 
-    const ground = world.heightAt(x, z);
-    if (y - ground <= TUNE.clearance) {
-      return { type: 'crash', reason: 'Flew into terrain' };
+      if (y <= TUNE.waterline) {
+        this.position.set(x, TUNE.waterline, z);
+        this.velocity.set(0, 0, 0);
+        return { type: 'crash', reason: 'Ditched in the sea' };
+      }
+
+      const ground = world.heightAt(x, z);
+      if (y - ground <= TUNE.clearance) {
+        this.position.set(x, ground + TUNE.clearance, z);
+        this.velocity.set(0, 0, 0);
+        return { type: 'crash', reason: 'Flew into terrain' };
+      }
     }
     return null;
   }
@@ -244,6 +276,7 @@ export class Plane {
   settleOnRunway(surfaceY) {
     this.onGround = true;
     this.position.y = surfaceY;
+    this._prevPos.copy(this.position);
     this.velocity.y = 0;
   }
 }
