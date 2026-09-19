@@ -34,7 +34,8 @@ export const Input = {
   roll: () => axis(['KeyA', 'ArrowLeft'], ['KeyD', 'ArrowRight']),
   yaw: () => axis(['KeyQ'], ['KeyE']),
   throttle: () => axis(['ControlLeft', 'ControlRight'], ['ShiftLeft', 'ShiftRight']),
-  brake: () => down('Space'),
+  /** Wheel brake on the ground, airbrake in the air. */
+  brake: () => down('KeyB', 'Space'),
   /** True only on the frame the key went down. */
   tapped: (code) => fresh.has(code),
   endFrame: () => fresh.clear(),

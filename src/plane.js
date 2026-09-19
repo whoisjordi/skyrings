@@ -27,7 +27,7 @@ export const TUNE = {
   rotateSpeed: 55,     // runway speed at which the nose will lift
   groundSteer: 0.85,
   groundDrag: 2.5,
-  brakeDecel: 16,
+  brakeDecel: 34,      // wheel brakes: ~100kt to a standstill in about 3s
   airbrake: 5,
   clearance: 2.4,      // how close the belly gets before it counts as contact
   waterline: 0.5,      // sea level contact height

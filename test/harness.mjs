@@ -124,6 +124,36 @@ function checkPhysics(cfg, w) {
   ok(plane.up.y > 0 && heldBank > 0.8 && heldBank < 1.45,
     `holding aileron does not settle into a bank (${heldBank.toFixed(2)} rad, up.y ${plane.up.y.toFixed(2)})`);
 
+  // Wheel brakes must stop a landing roll well inside the runway.
+  {
+    const p2 = new Plane(cfg.palette);
+    p2.reset(airport.start.x, airport.surfaceY, airport.start.z, airport.start.heading);
+    p2.speed = 100;
+    const x0 = p2.position.x, z0 = p2.position.z;
+    let rolled = 0, stopped = false;
+    for (let i = 0; i < 3600; i++) {
+      p2.update(STEP, { pitch: 0, roll: 0, yaw: 0, throttle: -1, brake: true }, world);
+      rolled = Math.hypot(p2.position.x - x0, p2.position.z - z0);
+      if (p2.speed < 1) { stopped = true; break; }
+    }
+    ok(stopped && rolled < 420, `braking from 100kt took ${rolled.toFixed(0)} units`);
+
+    // ...and they have to actually beat coasting.
+    const p3 = new Plane(cfg.palette);
+    p3.reset(airport.start.x, airport.surfaceY, airport.start.z, airport.start.heading);
+    p3.speed = 100;
+    for (let i = 0; i < 240; i++) {
+      p3.update(STEP, { pitch: 0, roll: 0, yaw: 0, throttle: -1, brake: false }, world);
+    }
+    const p4 = new Plane(cfg.palette);
+    p4.reset(airport.start.x, airport.surfaceY, airport.start.z, airport.start.heading);
+    p4.speed = 100;
+    for (let i = 0; i < 240; i++) {
+      p4.update(STEP, { pitch: 0, roll: 0, yaw: 0, throttle: -1, brake: true }, world);
+    }
+    ok(p4.speed < p3.speed - 20, `brake barely helps (${p4.speed.toFixed(0)} vs ${p3.speed.toFixed(0)} coasting)`);
+  }
+
   // Stall, then recovery.
   let minSpeed = Infinity, stalled = false;
   for (let i = 0; i < 2400; i++) {
