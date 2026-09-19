@@ -6,10 +6,14 @@
 import * as THREE from 'three';
 
 export const WORLD_SIZE = 5000;
+// Cell size is WORLD_SIZE / segments; a level with a carved canyon needs a
+// finer grid or the walls come out as a handful of huge facets.
 const SEGMENTS = 128;
 
 // Height of the flat apron the airport sits on, and how far it reaches.
+// Levels that sit on high ground override it.
 export const AIRPORT_Y = 20;
+export const airportYOf = (cfg) => cfg.airportY ?? AIRPORT_Y;
 const APRON_HALF = 520;   // apron follows the runway rather than a circle
 const APRON_R = 300;
 const APRON_FADE = 450;
@@ -77,9 +81,11 @@ function makePerlin(seed) {
 /**
  * Builds the terrain for one level.
  * @param {object} cfg  seed, amp, mountain, palette, airport {x,z}
+ * @param {object|null} [canyon] carved into the terrain last, if present
  */
-export function createTerrain(cfg) {
+export function createTerrain(cfg, canyon = null) {
   const noise = makePerlin(cfg.seed);
+  const airportY = airportYOf(cfg);
 
   const fbm = (x, z, octaves, freq) => {
     let sum = 0, amp = 1, norm = 0;
@@ -99,6 +105,7 @@ export function createTerrain(cfg) {
   };
 
   const half = WORLD_SIZE / 2;
+  const lift = cfg.baseLift ?? 0;   // plateau the whole interior sits on
   const rh = cfg.runwayHeading ?? 0;
   const rcos = Math.cos(rh);
   const rsin = Math.sin(rh);
@@ -114,7 +121,9 @@ export function createTerrain(cfg) {
     const hills = fbm(x, z, 4, 0.0018) * 0.3;
     const peaks = ridged(x, z) * cfg.mountain;
 
-    let h = (base + hills + peaks) * cfg.amp * falloff - cfg.amp * 0.16;
+    // The plateau rides the same coastal falloff as the relief, so high ground
+    // still runs out into the sea instead of ending at a cliff.
+    let h = ((base + hills + peaks) * cfg.amp + lift) * falloff - cfg.amp * 0.16;
 
     // Airport-local coordinates: the runway lies along local z.
     const rdx = x - cfg.airport.x, rdz = z - cfg.airport.z;
@@ -124,22 +133,27 @@ export function createTerrain(cfg) {
     // Flatten an apron so the runway always has somewhere level to sit. The
     // apron is a stadium shape following the strip, not a circle.
     const ad = Math.hypot(lx, Math.max(0, Math.abs(lz) - APRON_HALF));
-    h = lerp(AIRPORT_Y, h, smoothstep(APRON_R, APRON_R + APRON_FADE, ad));
+    h = lerp(airportY, h, smoothstep(APRON_R, APRON_R + APRON_FADE, ad));
 
     // Cap the terrain under the climb-out and the final approach.
     const along = Math.max(0, Math.abs(lz) - APRON_HALF);
     const influence = (1 - smoothstep(CORRIDOR_END, CORRIDOR_END + CORRIDOR_FADE, Math.abs(lz)))
       * (1 - smoothstep(CORRIDOR_HALF_W * 0.55, CORRIDOR_HALF_W, Math.abs(lx)));
     if (influence > 0) {
-      const ceiling = AIRPORT_Y + along * CORRIDOR_GRADIENT;
+      const ceiling = airportY + along * CORRIDOR_GRADIENT;
       h = lerp(h, Math.min(h, ceiling), influence);
     }
+
+    // Cut the gorge last. It only ever lowers ground, so neither the apron nor
+    // the corridor above can fill it back in.
+    if (canyon) h = canyon.carve(x, z, h);
 
     return h;
   }
 
   // ---- mesh -------------------------------------------------------------
-  let geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, SEGMENTS, SEGMENTS);
+  const segments = cfg.segments ?? SEGMENTS;
+  let geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, segments, segments);
   geo.rotateX(-Math.PI / 2);
 
   const pos = geo.attributes.position;
@@ -162,16 +176,21 @@ export function createTerrain(cfg) {
   const colors = new Float32Array(vp.count * 3);
   const c = new THREE.Color();
   const tintRnd = mulberry32(cfg.seed ^ 0x5eed);
-  const snowLine = cfg.amp * 0.62;
+
+  // Absolute heights, because a level on a plateau cannot derive them from
+  // `amp` — everything would land above the snow line.
+  const B = cfg.bands ?? {
+    sand: 6, low: cfg.amp * 0.2, high: cfg.amp * 0.55, top: cfg.amp * 0.62,
+  };
 
   for (let f = 0; f < vp.count; f += 3) {
     const y = (vp.getY(f) + vp.getY(f + 1) + vp.getY(f + 2)) / 3;
     const flatness = vn.getY(f); // 1 = level ground, 0 = cliff
 
-    if (y < 6) c.copy(sand);
-    else if (flatness < 0.62) c.copy(rock);
-    else if (y > snowLine) c.lerpColors(rock, snow, smoothstep(snowLine, snowLine * 1.5, y));
-    else c.lerpColors(grass, rock, smoothstep(cfg.amp * 0.2, cfg.amp * 0.55, y));
+    if (y < B.sand) c.copy(sand);
+    else if (flatness < 0.62) c.copy(rock);     // any cliff or canyon wall
+    else if (y > B.top) c.lerpColors(rock, snow, smoothstep(B.top, B.top * 1.5, y));
+    else c.lerpColors(grass, rock, smoothstep(B.low, B.high, y));
 
     // A touch of per-facet variation keeps large slopes from looking plastic.
     const t = 0.92 + tintRnd() * 0.16;

@@ -4,10 +4,11 @@ import * as THREE from 'three';
 import { initInput, Input } from './input.js';
 import { Save } from './save.js';
 import { LEVELS, formatTime } from './levels.js';
-import { createTerrain, WORLD_SIZE } from './terrain.js';
+import { createTerrain, WORLD_SIZE, airportYOf } from './terrain.js';
 import { createAirport } from './airport.js';
-import { buildRoute, RingSet } from './rings.js';
+import { buildRoute, buildCanyonRoute, RingSet } from './rings.js';
 import { applySky, createClouds, createCity } from './scenery.js';
+import { createCanyon } from './canyon.js';
 import { Plane, TUNE } from './plane.js';
 import { ChaseCamera } from './camera.js';
 import { HUD } from './hud.js';
@@ -72,9 +73,14 @@ function loadLevel(index) {
   const cfg = LEVELS[index];
 
   const root = new THREE.Group();
-  const terrain = createTerrain(cfg);
+  // The canyon has to exist before the terrain, which is carved to match it,
+  // and before the route, which is threaded along it.
+  const canyon = createCanyon(cfg, airportYOf(cfg));
+  const terrain = createTerrain(cfg, canyon);
   const airport = createAirport(cfg);
-  const gates = buildRoute(cfg, airport, terrain.heightAt);
+  const gates = canyon
+    ? buildCanyonRoute(cfg, airport, canyon)
+    : buildRoute(cfg, airport, terrain.heightAt);
   const rings = new RingSet(cfg, gates);
   // The city is built around the route so there is always a lane to fly.
   const corridor = [airport.center, ...gates.map((g) => g.position), airport.center];
@@ -85,7 +91,7 @@ function loadLevel(index) {
   if (city) root.add(city.group);
   scene.add(root);
 
-  level = { cfg, root, terrain, airport, gates, rings, city, plane };
+  level = { cfg, root, terrain, airport, canyon, gates, rings, city, plane };
   HUD.setLevel(cfg.name);
   resetRun();
 }

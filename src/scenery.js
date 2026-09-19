@@ -52,7 +52,8 @@ export function createClouds(cfg) {
     const dist = 300 + rnd() * 1900;
     puff.position.set(
       Math.cos(ang) * dist,
-      420 + rnd() * 560,
+      // Levels on a plateau need their weather lifted with them.
+      (cfg.cloudBase ?? 420) + rnd() * 560,
       Math.sin(ang) * dist,
     );
     puff.scale.setScalar(0.7 + rnd() * 1.2);

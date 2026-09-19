@@ -79,6 +79,7 @@ src/plane.js    arcade flight model and the aeroplane mesh
 src/terrain.js  seeded Perlin terrain, airport apron, departure corridor
 src/airport.js  runway geometry, touchdown judging, approach info
 src/rings.js    route generation, terrain clearance, gate crossing detection
+src/canyon.js   the carved gorge: centreline, depth profile, distance queries
 src/scenery.js  sky, lighting, clouds, instanced city with collision
 src/camera.js   chase and cockpit cameras
 src/hud.js      DOM HUD, off-screen target arrow
@@ -156,6 +157,31 @@ Two constraints keep a generated world playable:
 On City Towers the buildings are placed *after* the route and any tower within
 170 m of a route leg is skipped, so there is always a lane to fly.
 
+### The canyon
+
+Canyon Run swaps both of those constraints for a different one. The level sits
+on a 470 m plateau, and a single 6.1 km gorge is cut into it: a long sweeping
+loop around the airfield with S-bends laid over the top, so it curves at two
+scales instead of reading as a circle with a wobble. It is 300 m wide at the
+floor, 370 m deep, and shallow at both ends — it starts and finishes at plateau
+level — so you can descend in and climb out without meeting a wall head-on.
+
+One object owns the gorge. The terrain asks it *how deep is the ground here*
+and the route asks it *where does the next gate go*, so the canyon you see and
+the canyon you fly cannot drift apart. The carve only ever lowers ground, which
+means it can be applied after the apron and the corridor and nothing can fill
+it back in. A uniform grid indexes the 900-segment centreline, because
+`heightAt` runs ~31 k times just to build the mesh and several more times per
+frame.
+
+Every gate but the last is on the centreline, 80 m off the floor and 130–314 m
+below the rim. The last one is out in the open on final approach, clear of the
+carved zone. The clearance pass that lifts the open routes is deliberately
+*not* run here — it would haul the gates straight out of the gorge. What keeps
+it flyable instead is spacing: gates every 430 m, close enough that the
+straight line between consecutive ones never strays more than 60 m from the
+centreline, against walls at 150 m.
+
 ### Gate detection
 
 Each gate stores a fixed world→gate matrix. A crossing is a sign change of the
@@ -192,6 +218,10 @@ import `three`. The suite builds every level and asserts:
   climbed away all leave the aeroplane on the surface, never inside it.
 - **Worlds** — the apron is flat, the start point is on the runway, gates clear
   the terrain and sit inside the map, and every route leg clears the ground.
+- **The canyon** — it is long, every gate but the last is inside the walls and
+  below the rim, the chords between gates stay between the walls, the final
+  gate is outside the carved zone, and the gorge keeps well clear of the
+  runway.
 - **Gate detection** — dead centre registers, just inside the rim registers,
   well outside does not, and a 180 m single-frame jump does not tunnel.
 
@@ -214,5 +244,7 @@ smoke signal, not a specification.
 - [ ] Gamepad support via the Gamepad API
 - [ ] Mobile: touch controls and a smaller terrain mesh
 - [ ] More missions, and a seed field so you can generate your own
+- [ ] A second canyon level, or a seed for the gorge shape
+- [ ] Canyon walls could use strata banding rather than one flat rock colour
 - [ ] Engine audio is a bit coarse — the drone could use a second detuned
       oscillator and a proper doppler on the gate chime

@@ -26,22 +26,52 @@ export const LEVELS = [
   {
     id: 'canyon',
     name: 'Canyon Run',
-    blurb: 'Tight gates between the ridges. Commit to your turns.',
+    blurb: 'Drop into the gorge and stay in it. Every gate but the last is below the rim.',
     seed: 90210,
-    amp: 430,
-    mountain: 0.95,
-    airport: { x: 700, z: -650 },
-    runwayHeading: Math.PI * 0.35,
-    target: 145,
-    route: { count: 11, radius: 1450, altitude: 430, spread: 0.75, ringRadius: 36 },
+    // Gentle relief sitting on a high plateau, so the canyon has something
+    // deep to be cut into rather than being a ditch between hills.
+    amp: 150,
+    mountain: 0.35,
+    baseLift: 470,
+    segments: 176,        // finer mesh, or the canyon walls come out as slabs
+    airport: { x: 0, z: 0 },
+    airportY: 480,        // the airfield sits up on the rim
+    runwayHeading: 0,
+    target: 210,
+    route: { ringRadius: 42 },
+    canyon: {
+      // A long sweeping loop around the airfield with S-bends laid over it:
+      // about 5.6km of gorge, curving at two different scales.
+      radius: 1150,
+      wiggle: 140,
+      waves: 4,
+      sweep: 4.87,                 // ~279 degrees
+      startAngle: -Math.PI / 2,    // entrance straight off the departure end
+      halfWidth: 150,
+      rim: 130,
+      depth: 370,
+      // Shallow at both ends, so you can descend in and climb out without
+      // meeting a wall head-on.
+      entryRamp: 0.1,
+      exitRamp: 0.1,
+      gateHeight: 80,
+      spacing: 430,                // close enough that the chords stay inside
+      // The one gate out in the open. It has to sit clear of the canyon ring
+      // itself (radius 1010-1290 plus rim), hence well beyond it on final.
+      finalGate: 1700,
+      finalHeight: 190,
+    },
+    // Absolute colour bands: on a plateau these cannot be derived from `amp`.
+    bands: { sand: 40, low: 80, high: 300, top: 380 },
+    cloudBase: 950,       // the plateau is at 480; clouds belong above it
     city: null,
     palette: {
-      sky: 0xd8b98c, fog: 0xe0c49b, fogNear: 600, fogFar: 3200,
+      sky: 0xd8b98c, fog: 0xe0c49b, fogNear: 700, fogFar: 3400,
       sun: 0xffe6b8, sunIntensity: 2.4, hemi: 0xe7cfa6, ground: 0x6b4a33, hemiIntensity: 0.9,
       water: 0x2c6f8f,
-      sand: 0xcaa878, grass: 0x8a7a4e, rock: 0x8c6b52, snow: 0xf2ece1,
+      sand: 0xc2a173, grass: 0xa8804f, rock: 0x9c4a2f, snow: 0xd8be96,
       body: 0x3c6fd1, accent: 0xf0f3f6,
-      cloud: 0xfaf0e2, cloudCount: 16,
+      cloud: 0xfaf0e2, cloudCount: 14,
     },
   },
   {

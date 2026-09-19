@@ -1,12 +1,11 @@
 // The runway: where every mission starts and the only place it can end well.
 
 import * as THREE from 'three';
-import { AIRPORT_Y } from './terrain.js';
+import { airportYOf } from './terrain.js';
 
 const LENGTH = 900;
 const WIDTH = 70;
 const SLAB = 0.8;                 // runway thickness
-const TOP_Y = AIRPORT_Y + SLAB / 2;
 const WHEEL_DROP = 2.4;           // model centre sits this far above the wheels
 const BELLY_DROP = 1.1;           // with the legs tucked away it sits lower
 const SIDE_MARGIN = 14;           // grace before "ran off the runway"
@@ -22,6 +21,8 @@ const LIMITS = {
 };
 
 export function createAirport(cfg) {
+  const AIRPORT_Y = airportYOf(cfg);
+  const TOP_Y = AIRPORT_Y + SLAB / 2;
   const { x: ax, z: az } = cfg.airport;
   const heading = cfg.runwayHeading ?? 0;
   const cos = Math.cos(heading);

@@ -7,9 +7,10 @@
 // 250-unit turn radius, so its score is a smoke signal rather than a spec.
 import * as THREE from 'three';
 import { LEVELS } from '../src/levels.js';
-import { createTerrain, AIRPORT_Y, WORLD_SIZE } from '../src/terrain.js';
+import { createTerrain, airportYOf, WORLD_SIZE } from '../src/terrain.js';
 import { createAirport } from '../src/airport.js';
-import { buildRoute, RingSet } from '../src/rings.js';
+import { buildRoute, buildCanyonRoute, RingSet } from '../src/rings.js';
+import { createCanyon } from '../src/canyon.js';
 import { createCity } from '../src/scenery.js';
 import { Plane, TUNE, NITRO } from '../src/plane.js';
 
@@ -22,15 +23,18 @@ const STEP = 1 / 120;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 function build(cfg) {
-  const terrain = createTerrain(cfg);
+  const canyon = createCanyon(cfg, airportYOf(cfg));
+  const terrain = createTerrain(cfg, canyon);
   const airport = createAirport(cfg);
-  const gates = buildRoute(cfg, airport, terrain.heightAt);
+  const gates = canyon
+    ? buildCanyonRoute(cfg, airport, canyon)
+    : buildRoute(cfg, airport, terrain.heightAt);
   const rings = new RingSet(cfg, gates);
   const corridor = [airport.center, ...gates.map((g) => g.position), airport.center];
   const city = createCity(cfg, terrain.heightAt, corridor);
   const plane = new Plane(cfg.palette);
   plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
-  return { terrain, airport, gates, rings, city, plane };
+  return { terrain, airport, canyon, gates, rings, city, plane };
 }
 
 // --- world -----------------------------------------------------------------
@@ -42,7 +46,7 @@ function checkWorld(cfg, w) {
     for (const r of [0, 60, 140, 240]) {
       const x = cfg.airport.x + Math.cos(a) * r;
       const z = cfg.airport.z + Math.sin(a) * r;
-      maxDev = Math.max(maxDev, Math.abs(terrain.heightAt(x, z) - AIRPORT_Y));
+      maxDev = Math.max(maxDev, Math.abs(terrain.heightAt(x, z) - airportYOf(cfg)));
     }
   }
   ok(maxDev < 0.5, `apron not flat (max deviation ${maxDev.toFixed(2)})`);
@@ -61,6 +65,12 @@ function checkWorld(cfg, w) {
     minGap = Math.min(minGap, gates[i].position.distanceTo(gates[i - 1].position));
   }
   ok(minGap > 150, `gates bunched together (${minGap.toFixed(0)})`);
+
+  // Canyon levels trade this contract for a different one, checked separately:
+  // the gates are deliberately below the rim, so a straight line from the
+  // runway to the first of them is *supposed* to be blocked — you fly over the
+  // edge and drop in.
+  if (cfg.canyon) return { maxDev, minClear, minGap, maxR, worstSeg: NaN, worstAt: -1 };
 
   // The contract the route promises: fly straight from the runway to each gate
   // in turn and back, and you will not meet the ground on the way.
@@ -362,6 +372,68 @@ function checkPhysics(cfg, w) {
   };
 }
 
+// --- canyon ----------------------------------------------------------------
+// The canyon promises something different from the open routes: every gate but
+// the last is inside the gorge, and consecutive gates are close enough that
+// the straight line between them stays between the walls.
+function checkCanyon(cfg, w) {
+  const { canyon, gates, terrain, airport } = w;
+  const spec = cfg.canyon;
+  const canyonGates = gates.slice(0, -1);
+  const finalGate = gates[gates.length - 1];
+
+  ok(canyonGates.length >= 8, `canyon has only ${canyonGates.length} gates in it`);
+  ok(canyon.length > 4000, `canyon is only ${canyon.length.toFixed(0)} units long`);
+
+  let inside = 0, minBelowRim = Infinity;
+  for (const g of canyonGates) {
+    const p = g.position;
+    if (canyon.contains(p.x, p.z, 0)) inside++;
+    // Sample the rim square to the canyon, out past the far edge of the wall.
+    const q = canyon.query(p.x, p.z);
+    const d = canyon.dirAt(q.u);
+    const out = spec.halfWidth + spec.rim + 90;
+    const rim = Math.max(
+      terrain.heightAt(p.x - d.y * out, p.z + d.x * out),
+      terrain.heightAt(p.x + d.y * out, p.z - d.x * out),
+    );
+    minBelowRim = Math.min(minBelowRim, rim - p.y);
+  }
+  ok(inside === canyonGates.length,
+    `${canyonGates.length - inside} canyon gates are outside the walls`);
+  ok(minBelowRim > 60, `a canyon gate sits only ${minBelowRim.toFixed(0)} below the rim`);
+
+  // The last gate is the one exception: out in the open, on final approach,
+  // and clear of the carved zone entirely rather than just of the walls.
+  const fq = canyon.query(finalGate.position.x, finalGate.position.z);
+  ok(!fq || fq.dist > spec.halfWidth + spec.rim,
+    `the final gate is ${fq ? fq.dist.toFixed(0) : '?'} from the canyon centreline,`
+    + ` inside the carved zone (${spec.halfWidth + spec.rim})`);
+
+  // Chords between consecutive gates must not cut through a wall.
+  let worstChord = 0;
+  for (let i = 0; i < canyonGates.length - 1; i++) {
+    const a = canyonGates[i].position, b = canyonGates[i + 1].position;
+    for (let s2 = 0; s2 <= 12; s2++) {
+      const t = s2 / 12;
+      const q = canyon.query(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
+      worstChord = Math.max(worstChord, q ? q.dist : Infinity);
+    }
+  }
+  ok(worstChord < spec.halfWidth,
+    `a chord strays ${worstChord.toFixed(0)} from the centreline (walls at ${spec.halfWidth})`);
+
+  // ...and the gorge must not eat the runway.
+  let nearest = Infinity;
+  for (let i = 0; i <= 200; i++) {
+    const p = canyon.pointAt(i / 200);
+    nearest = Math.min(nearest, Math.hypot(p.x - airport.center.x, p.y - airport.center.z));
+  }
+  ok(nearest > 700, `the canyon comes within ${nearest.toFixed(0)} of the runway`);
+
+  return { count: canyonGates.length, length: canyon.length, worstChord, minBelowRim, nearest };
+}
+
 // --- ground is solid ------------------------------------------------------
 // Whatever happens, the aeroplane must never come to rest inside the scenery.
 function checkGround(cfg, w) {
@@ -421,12 +493,15 @@ function checkGround(cfg, w) {
 
 // --- gate detection --------------------------------------------------------
 function checkGates(cfg, w) {
-  const { gates, airport, terrain } = w;
+  const { gates } = w;
   const fwd = new THREE.Vector3();
   const right = new THREE.Vector3();
 
+  // Reuse the route the level was actually built with — rebuilding it here
+  // would call the open-country builder even on a canyon level, which has no
+  // config for it.
   const fly = (offsetFactor) => {
-    const rings = new RingSet(cfg, buildRoute(cfg, airport, terrain.heightAt));
+    const rings = new RingSet(cfg, gates);
     const g = rings.rings[0];
     fwd.set(0, 0, -1).applyQuaternion(g.quaternion);
     right.set(1, 0, 0).applyQuaternion(g.quaternion);
@@ -445,7 +520,7 @@ function checkGates(cfg, w) {
   ok(!fly(1.8), 'passing well outside the rim still registers');
 
   // A single frame must not tunnel through the gate plane unnoticed.
-  const rings = new RingSet(cfg, buildRoute(cfg, airport, terrain.heightAt));
+  const rings = new RingSet(cfg, gates);
   const g = rings.rings[0];
   fwd.set(0, 0, -1).applyQuaternion(g.quaternion);
   const before = g.position.clone().addScaledVector(fwd, -90);
@@ -593,6 +668,13 @@ for (const cfg of LEVELS) {
 
   checkGates(cfg, build(cfg));
   checkGround(cfg, build(cfg));
+  if (cfg.canyon) {
+    const c = checkCanyon(cfg, build(cfg));
+    console.log(`  canyon  ${c.length.toFixed(0)} units, ${c.count} gates inside`
+      + `  chords stray ${c.worstChord.toFixed(0)}/${cfg.canyon.halfWidth}`
+      + `  gates ${c.minBelowRim.toFixed(0)}+ below the rim`
+      + `  runway clear by ${c.nearest.toFixed(0)}`);
+  }
   const phys = checkPhysics(cfg, build(cfg));
   console.log(`  flight  rotate ${phys.takeoffTime.toFixed(1)}s / ${phys.rollDist.toFixed(0)}m`
     + `  cruise ${phys.cruise.toFixed(0)}  stall min ${phys.minSpeed.toFixed(0)}`);

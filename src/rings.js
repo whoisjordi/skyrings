@@ -147,6 +147,50 @@ export function buildRoute(cfg, airport, heightAt) {
   return gates;
 }
 
+/**
+ * Threads the route down a canyon instead of looping over open country.
+ *
+ * Every gate sits on the centreline below the rim except the last, which is
+ * outside on final approach. The clearance pass used by the open routes is
+ * deliberately NOT applied here: it would lift the gates straight out of the
+ * gorge. What keeps this flyable instead is the spacing — gates are placed
+ * close enough together that the straight line between consecutive ones stays
+ * between the walls.
+ *
+ * @returns {{position:THREE.Vector3, quaternion:THREE.Quaternion}[]}
+ */
+export function buildCanyonRoute(cfg, airport, canyon) {
+  const spec = cfg.canyon;
+  const gates = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const m = new THREE.Matrix4();
+
+  // Skip the very ends, where the canyon is still only a dip in the plateau.
+  const startArc = canyon.length * spec.entryRamp * 0.55;
+  const endArc = canyon.length * (1 - spec.exitRamp * 0.55);
+  const span = endArc - startArc;
+  const count = Math.max(2, Math.round(span / spec.spacing));
+
+  for (let i = 0; i <= count; i++) {
+    const u = canyon.uAtArc(startArc + (span * i) / count);
+    const p = canyon.pointAt(u);
+    const d = canyon.dirAt(u);
+    const position = new THREE.Vector3(p.x, canyon.floorAt(u) + spec.gateHeight, p.y);
+    const target = position.clone().add(new THREE.Vector3(d.x, 0, d.y));
+    m.lookAt(position, target, up);
+    gates.push({ position, quaternion: new THREE.Quaternion().setFromRotationMatrix(m) });
+  }
+
+  // One last gate out in the open, lined up on final approach.
+  const last = airport.center.clone().addScaledVector(airport.axis, -spec.finalGate);
+  last.y = airport.center.y + spec.finalHeight;
+  const lastTarget = last.clone().addScaledVector(airport.axis, 1);
+  m.lookAt(last, lastTarget, up);
+  gates.push({ position: last, quaternion: new THREE.Quaternion().setFromRotationMatrix(m) });
+
+  return gates;
+}
+
 export class RingSet {
   constructor(cfg, gates) {
     this.group = new THREE.Group();
