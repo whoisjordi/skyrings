@@ -9,10 +9,14 @@ export const LEVELS = [
     seed: 1337,
     amp: 190,
     mountain: 0.25,
-    airport: { x: -400, z: 900 },
+    airport: { x: 0, z: 150 },
     runwayHeading: 0,
     target: 110,
-    route: { count: 8, radius: 1250, altitude: 320, spread: 0.5, ringRadius: 46 },
+    route: {
+      count: 14, radius: 1700, altitude: 320, spread: 0.4, ringRadius: 46,
+      departAt: 900, joinRadius: 750, spacing: 1100, maxTurn: 30,
+      loops: 0, finalAt: 1300,
+    },
     city: null,
     palette: {
       sky: 0x8fc9e8, fog: 0xa9d4ea, fogNear: 700, fogFar: 3600,
@@ -37,7 +41,7 @@ export const LEVELS = [
     airport: { x: 0, z: 0 },
     airportY: 480,        // the airfield sits up on the rim
     runwayHeading: 0,
-    target: 210,
+    target: 185,
     route: { ringRadius: 42 },
     canyon: {
       // A long sweeping loop around the airfield with S-bends laid over it:
@@ -56,6 +60,14 @@ export const LEVELS = [
       exitRamp: 0.1,
       gateHeight: 80,
       spacing: 430,                // close enough that the chords stay inside
+      // A gate between the runway and the mouth, so the canyon entrance is
+      // something you are aimed at rather than something you go looking for.
+      departGate: 620,
+      departHeight: 150,
+      // Curving out of the gorge and round onto final.
+      maxTurn: 30,
+      approachPad: 480,   // keeps the sweep inside the turn-back warning
+      linkSpacing: 800,
       // The one gate out in the open. It has to sit clear of the canyon ring
       // itself (radius 1010-1290 plus rim), hence well beyond it on final.
       finalGate: 1700,
@@ -81,11 +93,15 @@ export const LEVELS = [
     seed: 24601,
     amp: 120,
     mountain: 0.05,
-    airport: { x: 1100, z: 1100 },
+    airport: { x: 150, z: -150 },
     runwayHeading: -Math.PI * 0.25,
-    target: 165,
-    route: { count: 12, radius: 1000, altitude: 260, spread: 0.55, ringRadius: 34 },
-    city: { x: -200, z: -200, radius: 850, count: 110, minH: 90, maxH: 300, corridor: 170 },
+    target: 210,
+    route: {
+      count: 18, radius: 1650, altitude: 260, spread: 0.5, ringRadius: 34,
+      departAt: 900, joinRadius: 700, spacing: 850, maxTurn: 30,
+      loops: 1, finalAt: 1300,
+    },
+    city: { x: -850, z: -850, radius: 780, count: 110, minH: 90, maxH: 300, corridor: 170 },
     palette: {
       sky: 0x9fb8cc, fog: 0xb6c8d6, fogNear: 550, fogFar: 3000,
       sun: 0xfff0e0, sunIntensity: 2.0, hemi: 0xb9cede, ground: 0x556070, hemiIntensity: 1.05,
@@ -102,10 +118,15 @@ export const LEVELS = [
     seed: 777001,
     amp: 300,
     mountain: 0.6,
-    airport: { x: -900, z: -1000 },
+    airport: { x: -150, z: 100 },
     runwayHeading: Math.PI * 0.62,
-    target: 190,
-    route: { count: 13, radius: 1500, altitude: 380, spread: 0.8, ringRadius: 38 },
+    target: 215,
+    route: {
+      count: 18, radius: 1650, altitude: 380, spread: 0.6, ringRadius: 38,
+      // Fog closes in at 1900 here, so gates have to be closer together.
+      departAt: 900, joinRadius: 700, spacing: 880, maxTurn: 28,
+      loops: 0, finalAt: 1300,
+    },
     city: null,
     palette: {
       sky: 0x0d1626, fog: 0x14203a, fogNear: 320, fogFar: 1900,

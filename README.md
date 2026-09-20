@@ -153,6 +153,29 @@ Two constraints keep a generated world playable:
   that have to be clear, not just the gates. The runway ends are pinned and
   their clearance requirement ramps in over 800 m, since the aeroplane is
   supposed to be near the ground there.
+- **Line of sight.** The next gate should be something you can see, not
+  something you hunt for with the HUD arrow. Gates are not spaced evenly:
+  the sampler walks the curve and drops one whenever the path has turned 30°
+  *or* run a set distance, so a long bend comes out with several gates through
+  it, each rotated a little further round. Across all four missions no gate now
+  turns more than 64° to reach the next, and the first is 5–8° off the runway
+  centreline.
+
+### Why the route is a circuit
+
+Getting "the next gate is in front of you" is mostly a geometry problem at the
+two ends, and both took a real construction rather than a tuned constant.
+
+Leaving the runway, you are flying radially away from the field; joining a
+circuit means flying tangentially around it. That is a 90° turn no matter what,
+and the only question is over what distance. Left to a spiral it came out with
+a radius near 250 — the whole 90° packed between two gates, which is exactly
+the case extra gates cannot fix. The departure is now an explicit arc of known
+radius, so the turn is spread over ~1100 m and three or four gates sit in it.
+
+Coming back, the circuit has to finish *further out* than the approach gate so
+the last leg runs inbound. Finishing inside it leaves a 180° reversal, and a
+reversal never reads as "ahead of you" however many gates are in it.
 
 On City Towers the buildings are placed *after* the route and any tower within
 170 m of a route leg is skipped, so there is always a lane to fly.
@@ -174,9 +197,16 @@ it back in. A uniform grid indexes the 900-segment centreline, because
 `heightAt` runs ~31 k times just to build the mesh and several more times per
 frame.
 
-Every gate but the last is on the centreline, 80 m off the floor and 130–314 m
-below the rim. The last one is out in the open on final approach, clear of the
-carved zone. The clearance pass that lifts the open routes is deliberately
+Every gate in the gorge is on the centreline, 80 m off the floor and 130–314 m
+below the rim. Two are outside it: one off the departure end, so the canyon
+mouth is something you are aimed at rather than something you go looking for,
+and the last on final approach, clear of the carved zone.
+
+The gorge finishes abeam the field pointing the wrong way for the runway, and
+there is no room on this map for a procedure turn outside the canyon ring. The
+route therefore keeps turning the way it already was, sweeping round the field
+and widening out to the approach side — longer than a reversal, but it never
+asks you to fly at a gate behind your shoulder. The clearance pass that lifts the open routes is deliberately
 *not* run here — it would haul the gates straight out of the gorge. What keeps
 it flyable instead is spacing: gates every 430 m, close enough that the
 straight line between consecutive ones never strays more than 60 m from the
@@ -220,10 +250,14 @@ import `three`. The suite builds every level and asserts:
   climbed away all leave the aeroplane on the surface, never inside it.
 - **Worlds** — the apron is flat, the start point is on the runway, gates clear
   the terrain and sit inside the map, and every route leg clears the ground.
-- **The canyon** — it is long, every gate but the last is inside the walls and
-  below the rim, the chords between gates stay between the walls, the final
-  gate is outside the carved zone, and the gorge keeps well clear of the
-  runway.
+- **The canyon** — it is long, the gates in the gorge are one unbroken run
+  inside the walls and below the rim, the chords between them stay between the
+  walls, the departure and approach gates are outside it, and the gorge keeps
+  well clear of the runway.
+- **Line of sight** — on every mission the first gate is within 35° of the
+  runway centreline, no gate turns more than 70° to reach the next, no leg is
+  longer than the fog, and the last gate is far enough out and low enough to
+  land from.
 - **Gate detection** — dead centre registers, just inside the rim registers,
   well outside does not, and a 180 m single-frame jump does not tunnel.
 
@@ -248,5 +282,7 @@ smoke signal, not a specification.
 - [ ] More missions, and a seed field so you can generate your own
 - [ ] A second canyon level, or a seed for the gorge shape
 - [ ] Canyon walls could use strata banding rather than one flat rock colour
+- [ ] The canyon's repositioning sweep is long; a second, lower gorge running
+      back towards the field would be a better way home than flying round
 - [ ] Engine audio is a bit coarse — the drone could use a second detuned
       oscillator and a proper doppler on the gate chime

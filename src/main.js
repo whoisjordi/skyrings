@@ -81,7 +81,7 @@ function loadLevel(index) {
   const terrain = createTerrain(cfg, canyon);
   const airport = createAirport(cfg);
   const gates = canyon
-    ? buildCanyonRoute(cfg, airport, canyon)
+    ? buildCanyonRoute(cfg, airport, canyon, terrain.heightAt)
     : buildRoute(cfg, airport, terrain.heightAt);
   const rings = new RingSet(cfg, gates);
   // The city is built around the route so there is always a lane to fly.
