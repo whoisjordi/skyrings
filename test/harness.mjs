@@ -324,12 +324,23 @@ function checkPhysics(cfg, w) {
       return p2;
     };
 
-    const plain = make(); fly(plain, 5);
+    const plain = make(); fly(plain, NITRO.duration);
     const boosted = make();
     ok(boosted.fireNitro(), 'nitro refuses to fire when charged');
-    fly(boosted, 5);
-    ok(boosted.speed > plain.speed + 30,
+    fly(boosted, NITRO.duration);
+    ok(boosted.speed > plain.speed + 120,
       `nitro barely accelerates (${boosted.speed.toFixed(0)} vs ${plain.speed.toFixed(0)})`);
+
+    // The speed ceiling must stay above what the thrust can reach, or it
+    // swallows the boost: every multiplier feels the same and the gear stops
+    // making any difference while the burn is lit.
+    const boostedGearUp = make();
+    boostedGearUp.gearDown = false; boostedGearUp.gearPos = 0;
+    boostedGearUp.fireNitro();
+    fly(boostedGearUp, NITRO.duration);
+    ok(boostedGearUp.speed > boosted.speed + 10,
+      `gear makes no difference under nitro (${boostedGearUp.speed.toFixed(0)} vs ${boosted.speed.toFixed(0)}kt)`
+      + ' — the speed cap is swallowing the boost');
 
     // It must not be re-armed while burning, and must expire on schedule.
     ok(!boosted.fireNitro(), 'nitro can be re-fired while already burning');

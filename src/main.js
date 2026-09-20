@@ -19,7 +19,9 @@ import { Audio } from './audio.js';
 const STEP = 1 / 120;
 const MAX_STEPS = 8;
 
-const SOFT_BOUND = WORLD_SIZE * 0.52;
+// Warning distance has to leave enough room to turn round at boost speed:
+// 320kt eats the gap to the hard limit in a couple of seconds.
+const SOFT_BOUND = WORLD_SIZE * 0.46;
 const HARD_BOUND = WORLD_SIZE * 0.62;
 const STOPPED = 4;          // speed below which a rollout counts as stopped
 

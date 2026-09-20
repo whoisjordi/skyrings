@@ -51,10 +51,10 @@ airframe is cleaner — top speed goes from about 131 kt to 153 kt — but you
 cannot land on it: you will belly in, slide, and the run ends there. The chip
 at the bottom left is green when it is safe to land.
 
-**Nitro** triples thrust for 5 s and then recharges for 10 s. It is a thrust
-multiplier rather than a speed multiplier: 129 → 205 kt with the gear down,
-143 → 232 kt with it up. Tripling the *speed* outright would be near 390 kt,
-which is too fast to thread a gate or stop before the end of the runway.
+**Nitro** applies six times thrust for 5 s and then recharges for 10 s. It is a
+thrust multiplier rather than a speed multiplier: 129 → 298 kt with the gear
+down, 143 → 323 kt with it up. Turns go noticeably wider while it is lit, which
+is the trade that makes it a decision rather than a free button.
 
 ## Running it locally
 
@@ -211,8 +211,10 @@ import `three`. The suite builds every level and asserts:
 - **Brakes, gear and nitro** — braking stops a 100 kt roll inside the runway
   and beats coasting; the gear is faster up, is refused on the ground, and does
   not count as down mid-travel; a gear-up arrival slides instead of landing;
-  nitro surges, cannot be re-armed mid-burn, expires on time and recharges on
-  time.
+  nitro surges, cannot be re-armed mid-burn, expires on time, recharges on
+  time, and does not run into its own speed ceiling — if the cap swallowed the
+  boost, every multiplier would feel the same and the gear would stop mattering
+  during a burn.
 - **Solid ground** — diving into terrain at top speed, planting it on the
   runway from 500 units up, and descending onto the runway before ever having
   climbed away all leave the aeroplane on the surface, never inside it.

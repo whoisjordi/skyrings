@@ -52,13 +52,17 @@ export const TUNE = {
   clearedHeight: 15,   // height that counts as genuinely off the runway
 };
 
-// Nitro. The multiplier is on THRUST, not on speed: tripling the speed
-// outright would put the aeroplane at ~390kt, far too fast to thread a gate or
-// to stop before the end of the runway. Tripling the push gives a hard, very
-// visible surge to roughly 1.7x cruise, which is the part that feels good.
+// Nitro. The multiplier is on THRUST, not on speed. Six times the push gives a
+// hard surge to roughly 300kt with the gear down and 320 with it up, against a
+// 127kt cruise — fast enough that turns go very wide while it is lit, which is
+// the trade that makes it a decision rather than a free button.
 export const NITRO = {
-  thrustMult: 3,
-  speedCapMult: 1.45,  // the ordinary ceiling would otherwise swallow the boost
+  thrustMult: 6,
+  // Headroom has to rise with the multiplier. At 6x thrust the aeroplane would
+  // sit pinned against a 1.45 ceiling the whole burn, which makes every
+  // multiplier above about 4x feel identical and stops the gear mattering
+  // while the boost is lit.
+  speedCapMult: 1.7,
   duration: 5,
   cooldown: 10,
   ramp: 0.45,          // seconds to blend in and out, so it never snaps on
