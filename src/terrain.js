@@ -10,6 +10,11 @@ export const WORLD_SIZE = 5000;
 // finer grid or the walls come out as a handful of huge facets.
 const SEGMENTS = 128;
 
+// Phones get a coarser mesh. Set once at boot rather than threaded through
+// every level config.
+let quality = 1;
+export const setTerrainQuality = (q) => { quality = q; };
+
 // Height of the flat apron the airport sits on, and how far it reaches.
 // Levels that sit on high ground override it.
 export const AIRPORT_Y = 20;
@@ -152,7 +157,7 @@ export function createTerrain(cfg, canyon = null) {
   }
 
   // ---- mesh -------------------------------------------------------------
-  const segments = cfg.segments ?? SEGMENTS;
+  const segments = Math.max(64, Math.round((cfg.segments ?? SEGMENTS) * quality));
   let geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, segments, segments);
   geo.rotateX(-Math.PI / 2);
 

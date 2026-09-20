@@ -11,6 +11,7 @@ import { createTerrain, airportYOf, WORLD_SIZE } from '../src/terrain.js';
 import { createAirport } from '../src/airport.js';
 import { buildRoute, buildCanyonRoute, RingSet } from '../src/rings.js';
 import { createCanyon } from '../src/canyon.js';
+import { tiltToScreen, shapeTilt } from '../src/touch.js';
 import { createCity } from '../src/scenery.js';
 import { Plane, TUNE, NITRO } from '../src/plane.js';
 
@@ -710,8 +711,61 @@ function flyMission(w) {
   };
 }
 
+// --- phone tilt -------------------------------------------------------------
+// The device-to-screen mapping and the response curve, checked here because on
+// an actual phone a wrong sign just feels vaguely bad rather than failing.
+function checkTilt() {
+  const near = (a, b, msg) => ok(Math.abs(a - b) < 1e-6, `${msg} (got ${a.toFixed(3)})`);
+
+  // Portrait: the axes pass straight through.
+  let t = tiltToScreen(10, 4, 0);
+  near(t.pitch, 10, 'portrait pitch is not beta');
+  near(t.roll, 4, 'portrait roll is not gamma');
+
+  // Landscape one way, then the other: the axes swap and one of them flips.
+  t = tiltToScreen(10, 4, 90);
+  near(t.pitch, 4, 'landscape-90 pitch should come from gamma');
+  near(t.roll, -10, 'landscape-90 roll should be -beta');
+
+  t = tiltToScreen(10, 4, 270);
+  near(t.pitch, -4, 'landscape-270 pitch should be -gamma');
+  near(t.roll, 10, 'landscape-270 roll should be beta');
+
+  // Upside down flips both.
+  t = tiltToScreen(10, 4, 180);
+  near(t.pitch, -10, 'inverted pitch should be -beta');
+  near(t.roll, -4, 'inverted roll should be -gamma');
+
+  // The two landscape orientations must be opposites of each other, or the
+  // game plays differently depending on which way you turned the phone.
+  const a = tiltToScreen(17, -6, 90);
+  const b = tiltToScreen(17, -6, 270);
+  near(a.pitch, -b.pitch, 'the two landscape modes disagree on pitch');
+  near(a.roll, -b.roll, 'the two landscape modes disagree on roll');
+
+  // Response curve.
+  ok(shapeTilt(0) === 0, 'centre is not neutral');
+  ok(shapeTilt(2) === 0, 'deadzone does not suppress a small tilt');
+  ok(shapeTilt(-2) === 0, 'deadzone is not symmetric');
+  ok(Math.abs(shapeTilt(60) - 1) < 1e-9, 'a big tilt does not reach full deflection');
+  ok(Math.abs(shapeTilt(-60) + 1) < 1e-9, 'a big negative tilt does not reach -1');
+  ok(shapeTilt(9) > 0 && shapeTilt(9) < shapeTilt(16),
+    'the response is not increasing with tilt');
+  ok(shapeTilt(9) < 0.35,
+    `small tilts are too sharp (${shapeTilt(9).toFixed(2)} at 9 degrees)`);
+  for (const d of [-90, -30, 0, 5, 30, 90, 1e6]) {
+    const v = shapeTilt(d);
+    ok(v >= -1 && v <= 1, `shapeTilt(${d}) left the -1..1 range`);
+    ok(Math.sign(v) === Math.sign(d) || v === 0, `shapeTilt(${d}) flipped sign`);
+  }
+}
+
 // --- run -------------------------------------------------------------------
 console.log('');
+console.log('\x1b[1mPhone tilt\x1b[0m');
+checkTilt();
+console.log('  mapping and response curve checked for all four screen orientations\n');
+
 for (const cfg of LEVELS) {
   console.log(`\x1b[1m${cfg.name}\x1b[0m`);
   const world = checkWorld(cfg, build(cfg));

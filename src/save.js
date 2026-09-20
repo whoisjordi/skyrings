@@ -7,7 +7,7 @@ const KEY = 'skyrings.v1';
 // Set back to false to restore unlock-as-you-go. Progress is still recorded
 // either way, so flipping this does not throw away anyone's unlocks.
 const UNLOCK_ALL = true;
-const EMPTY = { best: {}, unlocked: 1, invertPitch: false };
+const EMPTY = { best: {}, unlocked: 1, invertPitch: false, touch: {} };
 
 let state = load();
 
@@ -51,4 +51,11 @@ export const Save = {
 
   get invertPitch() { return state.invertPitch; },
   set invertPitch(v) { state.invertPitch = !!v; flush(); },
+
+  /** Touch/tilt preferences: control mode, axis inversion, tilt zero point. */
+  get touch() { return state.touch ?? {}; },
+  setTouch(patch) {
+    state.touch = { ...(state.touch ?? {}), ...patch };
+    flush();
+  },
 };

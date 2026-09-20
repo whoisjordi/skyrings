@@ -1,10 +1,11 @@
 // Entry point: builds a level, runs the loop, drives the menus.
 
 import * as THREE from 'three';
-import { initInput, Input } from './input.js';
+import { initInput, Input, setAuxInput } from './input.js';
+import { initTouch } from './touch.js';
 import { Save } from './save.js';
 import { LEVELS, formatTime } from './levels.js';
-import { createTerrain, WORLD_SIZE, airportYOf } from './terrain.js';
+import { createTerrain, WORLD_SIZE, airportYOf, setTerrainQuality } from './terrain.js';
 import { createAirport } from './airport.js';
 import { buildRoute, buildCanyonRoute, RingSet } from './rings.js';
 import { applySky, createClouds, createCity } from './scenery.js';
@@ -30,11 +31,18 @@ const $ = (id) => document.getElementById(id);
 // ---------------------------------------------------------------------------
 // Renderer
 // ---------------------------------------------------------------------------
+// Touch controls feed the same axes as the keyboard, so both stay live.
+const touch = initTouch();
+if (touch) {
+  setAuxInput(touch);
+  setTerrainQuality(0.72);   // coarser mesh; phones have far less to spend
+}
+
 const canvas = $('c');
 const renderer = new THREE.WebGLRenderer({
-  canvas, antialias: true, powerPreference: 'high-performance',
+  canvas, antialias: !touch, powerPreference: 'high-performance',
 });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, touch ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight, false);
 
 const scene = new THREE.Scene();
@@ -111,6 +119,7 @@ function resetRun() {
   level.root.add(level.rings.group);
 
   run = { time: 0, outcome: null, reason: '', landed: false, bellied: false, warned: false };
+  if (touch) touch.resetThrottle();
   chase.snap();
   HUD.clearBanner();
 }
@@ -128,6 +137,7 @@ function step(dt) {
     roll: Input.roll(),
     yaw: Input.yaw(),
     throttle: Input.throttle(),
+    throttleAbs: Input.throttleAbs(),
     brake: Input.brake(),
   };
 
@@ -330,6 +340,20 @@ function hideScreens() {
 
 function startLevel(index) {
   Audio.unlock();
+  if (touch) {
+    // Must happen inside the tap: iOS refuses the orientation permission
+    // anywhere else. Falls back to the drag stick if it is refused or the
+    // sensor never reports.
+    touch.enable().then((ok) => {
+      if (!ok) return HUD.banner('Tilt unavailable — drag to fly', 'warn', 4);
+      setTimeout(() => {
+        if (!touch.live && touch.mode === 'tilt') {
+          touch.setMode('stick');
+          HUD.banner('No tilt sensor — drag to fly', 'warn', 4);
+        }
+      }, 1800);
+    });
+  }
   if (!level || levelIndex !== index) loadLevel(index);
   else resetRun();
 
@@ -339,7 +363,7 @@ function startLevel(index) {
   hideScreens();
   HUD.show(true);
   Audio.startEngine();
-  HUD.banner('Throttle up — hold Shift', '', 3);
+  HUD.banner(touch ? 'Throttle up — slider on the left' : 'Throttle up — hold Shift', '', 3);
 }
 
 function pause() {
@@ -347,12 +371,22 @@ function pause() {
   state = 'paused';
   Audio.stopEngine();
   HUD.show(false);
+  if (touch) touch.disable();
   $('btn-invert').textContent = Save.invertPitch ? 'ON' : 'OFF';
+  refreshTouchOptions();
   showScreen('pause');
+}
+
+function refreshTouchOptions() {
+  if (!touch) return;
+  $('btn-mode').textContent = touch.mode === 'tilt' ? 'TILT' : 'DRAG';
+  $('btn-tilt-pitch').textContent = touch.inverted.pitch ? 'ON' : 'OFF';
+  $('btn-tilt-roll').textContent = touch.inverted.roll ? 'ON' : 'OFF';
 }
 
 function resume() {
   state = 'flying';
+  if (touch) touch.enable();
   last = performance.now();
   acc = 0;
   hideScreens();
@@ -363,6 +397,7 @@ function resume() {
 function toMenu() {
   state = 'menu';
   HUD.show(false);
+  if (touch) touch.disable();
   Audio.stopEngine();
   buildLevelList();
   showScreen('levels');
@@ -371,6 +406,7 @@ function toMenu() {
 function showResult() {
   state = 'result';
   HUD.show(false);
+  if (touch) touch.disable();
   const cfg = LEVELS[levelIndex];
   const won = run.outcome === 'win';
 
@@ -433,6 +469,25 @@ $('btn-invert').addEventListener('click', (e) => {
   Save.invertPitch = !Save.invertPitch;
   e.target.textContent = Save.invertPitch ? 'ON' : 'OFF';
 });
+
+if (touch) {
+  $('btn-mode').addEventListener('click', () => {
+    touch.setMode(touch.mode === 'tilt' ? 'stick' : 'tilt');
+    refreshTouchOptions();
+  });
+  $('btn-tilt-pitch').addEventListener('click', () => {
+    touch.setInvert('pitch', !touch.inverted.pitch);
+    refreshTouchOptions();
+  });
+  $('btn-tilt-roll').addEventListener('click', () => {
+    touch.setInvert('roll', !touch.inverted.roll);
+    refreshTouchOptions();
+  });
+  $('btn-recentre').addEventListener('click', () => {
+    touch.recentre();
+    refreshTouchOptions();
+  });
+}
 
 // Don't let the aeroplane fly on while the tab is hidden.
 addEventListener('visibilitychange', () => { if (document.hidden) pause(); });

@@ -187,7 +187,11 @@ export class Plane {
    * @returns {{type:string, reason?:string}|null} event for the caller to act on
    */
   update(dt, ctrl, world) {
-    this.throttle = clamp(this.throttle + ctrl.throttle * TUNE.throttleRate * dt, 0, 1);
+    // A slider sets the throttle outright; keys nudge it. Touch controls need
+    // the absolute form — you put the lever where you want it and let go.
+    this.throttle = ctrl.throttleAbs != null
+      ? clamp(ctrl.throttleAbs, 0, 1)
+      : clamp(this.throttle + ctrl.throttle * TUNE.throttleRate * dt, 0, 1);
 
     const event = this.onGround
       ? this._updateGround(dt, ctrl, world)

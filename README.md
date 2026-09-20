@@ -56,6 +56,31 @@ thrust multiplier rather than a speed multiplier: 129 → 298 kt with the gear
 down, 143 → 323 kt with it up. Turns go noticeably wider while it is lit, which
 is the trade that makes it a decision rather than a free button.
 
+## On a phone
+
+Open the same URL. The game detects a coarse pointer and switches controls:
+
+- **Tilt** the phone to pitch and roll. The zero point is captured when you
+  start flying, not taken from gravity, so it works at whatever angle you are
+  actually holding it — and the ⌖ button re-centres it mid-flight.
+- **Throttle** is the slider down the left edge. It stays where you put it.
+- **G / B / N** are the buttons down the right edge: gear, brake, nitro.
+- Landscape is better, and the game says so in portrait.
+
+iOS will not send orientation events until the page asks from inside a tap, so
+permission is requested on the Fly button. If it is refused — or the sensor
+never reports within about two seconds — the game falls back to **drag to fly**
+and says so. You can also switch modes by hand in the pause menu.
+
+If pitch or roll feels backwards, Pause has **Tilt: invert pitch / invert
+roll**. The two landscape orientations are mirror images of one another, which
+is checked in the test suite, so one setting holds whichever way you turn the
+phone.
+
+The desktop build is untouched by any of this: the touch controls are an
+auxiliary input source that *adds* to the keyboard axes rather than replacing
+them.
+
 ## Running it locally
 
 ES modules will not load from `file://`, so serve the folder over HTTP:
@@ -84,7 +109,8 @@ src/scenery.js  sky, lighting, clouds, instanced city with collision
 src/camera.js   chase and cockpit cameras
 src/hud.js      DOM HUD, off-screen target arrow
 src/audio.js    synthesised engine, chimes and crash noise (no audio files)
-src/input.js    keyboard state
+src/input.js    keyboard state, plus an optional auxiliary source
+src/touch.js    phone controls: tilt, throttle slider, on-screen buttons
 src/save.js     localStorage best times and unlocks
 src/levels.js   the four missions as data
 test/harness.mjs headless checks — see "Tests"
@@ -254,6 +280,10 @@ import `three`. The suite builds every level and asserts:
   inside the walls and below the rim, the chords between them stay between the
   walls, the departure and approach gates are outside it, and the gorge keeps
   well clear of the runway.
+- **Phone tilt** — the device-to-screen axis mapping for all four screen
+  orientations (including that the two landscape modes are exact opposites),
+  and the response curve: deadzone, full deflection at the limits, monotonic,
+  sign-preserving and always within range.
 - **Line of sight** — on every mission the first gate is within 35° of the
   runway centreline, no gate turns more than 70° to reach the next, no leg is
   longer than the fog, and the last gate is far enough out and low enough to
@@ -278,7 +308,9 @@ smoke signal, not a specification.
 - [ ] The flight probe was written for the old bank-turns-you model and cannot
       thread gates under the current one even after learning to pull in turns
 - [ ] Gamepad support via the Gamepad API
-- [ ] Mobile: touch controls and a smaller terrain mesh
+- [ ] Phone: a rudder control (yaw is currently keyboard-only)
+- [ ] Phone: confirm the default tilt directions on a real device — the axis
+      maths is tested but which way feels natural is not
 - [ ] More missions, and a seed field so you can generate your own
 - [ ] A second canyon level, or a seed for the gorge shape
 - [ ] Canyon walls could use strata banding rather than one flat rock colour
