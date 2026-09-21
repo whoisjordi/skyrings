@@ -340,20 +340,7 @@ function hideScreens() {
 
 function startLevel(index) {
   Audio.unlock();
-  if (touch) {
-    // Must happen inside the tap: iOS refuses the orientation permission
-    // anywhere else. Falls back to the drag stick if it is refused or the
-    // sensor never reports.
-    touch.enable().then((ok) => {
-      if (!ok) return HUD.banner('Tilt unavailable — drag to fly', 'warn', 4);
-      setTimeout(() => {
-        if (!touch.live && touch.mode === 'tilt') {
-          touch.setMode('stick');
-          HUD.banner('No tilt sensor — drag to fly', 'warn', 4);
-        }
-      }, 1800);
-    });
-  }
+  if (touch) touch.enable();
   if (!level || levelIndex !== index) loadLevel(index);
   else resetRun();
 
@@ -379,9 +366,7 @@ function pause() {
 
 function refreshTouchOptions() {
   if (!touch) return;
-  $('btn-mode').textContent = touch.mode === 'tilt' ? 'TILT' : 'DRAG';
-  $('btn-tilt-pitch').textContent = touch.inverted.pitch ? 'ON' : 'OFF';
-  $('btn-tilt-roll').textContent = touch.inverted.roll ? 'ON' : 'OFF';
+  $('btn-mode').textContent = touch.mode === 'arrows' ? 'ARROWS' : 'STICK';
 }
 
 function resume() {
@@ -472,19 +457,7 @@ $('btn-invert').addEventListener('click', (e) => {
 
 if (touch) {
   $('btn-mode').addEventListener('click', () => {
-    touch.setMode(touch.mode === 'tilt' ? 'stick' : 'tilt');
-    refreshTouchOptions();
-  });
-  $('btn-tilt-pitch').addEventListener('click', () => {
-    touch.setInvert('pitch', !touch.inverted.pitch);
-    refreshTouchOptions();
-  });
-  $('btn-tilt-roll').addEventListener('click', () => {
-    touch.setInvert('roll', !touch.inverted.roll);
-    refreshTouchOptions();
-  });
-  $('btn-recentre').addEventListener('click', () => {
-    touch.recentre();
+    touch.setMode(touch.mode === 'arrows' ? 'stick' : 'arrows');
     refreshTouchOptions();
   });
 }

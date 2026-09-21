@@ -1,20 +1,15 @@
-// Phone controls: tilt for pitch and roll, a throttle slider, and buttons for
-// gear, brake and nitro.
+// Phone controls: an on-screen stick (or an 8-way arrow pad in the same spot)
+// for pitch and roll, a throttle slider, and buttons for gear, brake and nitro.
 //
 // This is an auxiliary input source — it feeds the same axes the keyboard
 // does, so nothing here changes how the game plays on a desktop.
-//
-// Two things make tilt awkward and are handled up front rather than hoped
-// away. iOS will not deliver orientation events at all until you ask for
-// permission from inside a user gesture. And every phone is held at a
-// different angle, so the tilt is measured against a zero point captured when
-// you start flying rather than against gravity.
 
 import { Save } from './save.js';
 
-const TILT_RANGE = 26;    // degrees of tilt for full deflection
-const TILT_DEAD = 2.5;    // degrees ignored around the zero point
-const STICK_RANGE = 90;   // pixels of drag for full deflection, fallback mode
+const DEAD = 0.12;             // fraction of stick travel ignored at centre
+// How far off centre an arrow registers. sin(22.5 deg), so at full travel the
+// pad splits into eight equal 45-degree sectors.
+const ARROW_THRESHOLD = 0.383;
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -31,165 +26,119 @@ export const isTouchDevice = () => {
 };
 
 /**
- * Rotates the device's tilt axes into screen axes, so the controls mean the
- * same thing whichever way up the phone is held.
+ * Converts a thumb's offset from the pad centre into pitch and roll.
  *
- * Exported so the mapping can be checked without a phone in hand: it is the
- * part most likely to be wrong, and the symptom on a device is just "the
- * controls feel weird".
+ * Screen y grows downward, and pulling down means nose up — like a stick, and
+ * the same sense as the S key, so the pause menu's invert setting covers both.
  *
- * @param {number} beta  front-to-back tilt, degrees
- * @param {number} gamma left-to-right tilt, degrees
- * @param {number} angle screen.orientation.angle, degrees
+ * Exported so the mapping can be tested without a phone in hand.
+ *
+ * @param {number} dx pixels right of centre
+ * @param {number} dy pixels below centre
+ * @param {number} radius pixels of travel for full deflection
+ * @param {'stick'|'arrows'} mode analogue, or snapped to -1/0/+1 like keys
  */
-export function tiltToScreen(beta, gamma, angle) {
-  const rad = (angle * Math.PI) / 180;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
-  return {
-    pitch: beta * cos + gamma * sin,
-    roll: gamma * cos - beta * sin,
-  };
-}
+export function padToAxes(dx, dy, radius, mode) {
+  let x = dx / radius;
+  let y = dy / radius;
+  const mag = Math.hypot(x, y);
+  if (mag > 1) { x /= mag; y /= mag; }   // past the rim is just the rim
 
-/**
- * Deadzone, then a squared response so small corrections stay fine while the
- * edges of travel still give full deflection.
- * @param {number} deltaDeg degrees away from the calibrated zero
- */
-export function shapeTilt(deltaDeg) {
-  const mag = Math.abs(deltaDeg);
-  if (mag <= TILT_DEAD) return 0;
-  const t = clamp((mag - TILT_DEAD) / (TILT_RANGE - TILT_DEAD), 0, 1);
-  return Math.sign(deltaDeg) * t * t;
+  if (mode === 'arrows') {
+    const snap = (v) => (Math.abs(v) >= ARROW_THRESHOLD ? Math.sign(v) : 0);
+    return { roll: snap(x), pitch: snap(y) };
+  }
+
+  const m = Math.min(1, mag);
+  if (m <= DEAD) return { roll: 0, pitch: 0 };
+  // Rescale so output starts from zero at the edge of the deadzone instead of
+  // jumping straight to 12%. That jump is what makes small corrections twitchy.
+  const k = (m - DEAD) / (1 - DEAD) / m;
+  return { roll: x * k, pitch: y * k };
 }
 
 export function initTouch() {
   if (!isTouchDevice()) return null;
   document.body.classList.add('touch');
 
-  const prefs = Save.touch;
-  let mode = prefs.mode ?? 'tilt';           // 'tilt' | 'stick'
-  let invertPitch = prefs.invertPitch ?? false;
-  let invertRoll = prefs.invertRoll ?? false;
-  let zeroPitch = prefs.zeroPitch ?? null;
-  let zeroRoll = prefs.zeroRoll ?? null;
+  // Older saves may say 'tilt', which no longer exists; they get the stick.
+  let mode = Save.touch.mode === 'arrows' ? 'arrows' : 'stick';
+  document.body.classList.toggle('arrows-mode', mode === 'arrows');
 
-  let tiltPitch = 0, tiltRoll = 0;           // -1..1 after calibration
-  let stickPitch = 0, stickRoll = 0;
-  let sawOrientation = false;
-  let listening = false;
-
-  let throttle = 0;
-  let throttleTouched = false;
+  let pitch = 0, roll = 0;
+  let throttle = 0, throttleTouched = false;
   let braking = false;
   const taps = new Set();
 
-  // ---- tilt ---------------------------------------------------------------
-  let rawPitch = 0, rawRoll = 0;
-
-  function onOrientation(e) {
-    if (e.beta == null || e.gamma == null) return;
-    sawOrientation = true;
-
-    const angle = (screen.orientation && screen.orientation.angle)
-      ?? window.orientation ?? 0;
-    const screenTilt = tiltToScreen(e.beta, e.gamma, angle);
-    rawPitch = screenTilt.pitch;
-    rawRoll = screenTilt.roll;
-
-    if (zeroPitch == null) recentre();
-
-    const p = shapeTilt(rawPitch - zeroPitch);
-    const r = shapeTilt(rawRoll - zeroRoll);
-    tiltPitch = invertPitch ? -p : p;
-    tiltRoll = invertRoll ? -r : r;
-  }
-
-  function recentre() {
-    zeroPitch = rawPitch;
-    zeroRoll = rawRoll;
-    tiltPitch = 0;
-    tiltRoll = 0;
-    Save.setTouch({ zeroPitch, zeroRoll });
-  }
-
-  function listen() {
-    if (listening) return;
-    listening = true;
-    addEventListener('deviceorientation', onOrientation, true);
-  }
-
-  /**
-   * iOS needs this called from inside a tap. Resolves to whether tilt is
-   * actually going to work, so the caller can fall back to the stick.
-   */
-  async function requestTilt() {
-    const DOE = window.DeviceOrientationEvent;
-    if (!DOE) return false;
-    try {
-      if (typeof DOE.requestPermission === 'function') {
-        const granted = await DOE.requestPermission();
-        if (granted !== 'granted') return false;
-      }
-    } catch {
-      return false;
-    }
-    listen();
-    return true;
-  }
-
-  // ---- on-screen controls -------------------------------------------------
   const root = $('touch');
+
+  // ---- throttle slider ----------------------------------------------------
   const pad = $('thr-pad');
-  const knob = $('thr-knob');
-  const stickZone = $('stick-zone');
+  const padKnob = $('thr-knob');
 
   function setThrottle(v) {
     throttle = clamp(v, 0, 1);
     throttleTouched = true;
-    knob.style.bottom = `${throttle * 100}%`;
+    padKnob.style.bottom = `${throttle * 100}%`;
     pad.style.setProperty('--fill', `${throttle * 100}%`);
   }
-
-  function throttleFromEvent(e) {
+  const throttleFrom = (e) => {
     const r = pad.getBoundingClientRect();
     setThrottle(1 - (e.clientY - r.top) / r.height);
-  }
-
+  };
   pad.addEventListener('pointerdown', (e) => {
     pad.setPointerCapture(e.pointerId);
-    throttleFromEvent(e);
+    throttleFrom(e);
     e.preventDefault();
   });
   pad.addEventListener('pointermove', (e) => {
-    if (pad.hasPointerCapture(e.pointerId)) throttleFromEvent(e);
+    if (pad.hasPointerCapture(e.pointerId)) throttleFrom(e);
   });
 
-  // Fallback stick: drag anywhere in the open area on the left.
-  let stickId = null, stickX = 0, stickY = 0;
-  stickZone.addEventListener('pointerdown', (e) => {
-    if (mode !== 'stick') return;
-    stickId = e.pointerId;
-    stickX = e.clientX;
-    stickY = e.clientY;
-    stickZone.setPointerCapture(e.pointerId);
+  // ---- stick / arrow pad ----------------------------------------------------
+  // One zone, one thumb. The offset is measured from the pad's centre, not from
+  // wherever the thumb happened to land, so a given spot always means the same
+  // thing — that is what lets you fly it without looking.
+  const joy = $('joy');
+  const joyKnob = $('joy-knob');
+  let joyId = null;
+
+  function joyFrom(e) {
+    const r = joy.getBoundingClientRect();
+    const radius = (r.width / 2) * 0.72;
+    let dx = e.clientX - (r.left + r.width / 2);
+    let dy = e.clientY - (r.top + r.height / 2);
+    ({ roll, pitch } = padToAxes(dx, dy, radius, mode));
+
+    const m = Math.hypot(dx, dy);
+    if (m > radius) { dx *= radius / m; dy *= radius / m; }
+    joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+    joy.classList.toggle('up', pitch < 0);
+    joy.classList.toggle('down', pitch > 0);
+    joy.classList.toggle('left', roll < 0);
+    joy.classList.toggle('right', roll > 0);
+  }
+
+  function releaseJoy() {
+    joyId = null;
+    pitch = 0;
+    roll = 0;
+    joyKnob.style.transform = '';
+    joy.classList.remove('up', 'down', 'left', 'right');
+  }
+
+  joy.addEventListener('pointerdown', (e) => {
+    joyId = e.pointerId;
+    joy.setPointerCapture(e.pointerId);
+    joyFrom(e);
     e.preventDefault();
   });
-  stickZone.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== stickId) return;
-    stickRoll = clamp((e.clientX - stickX) / STICK_RANGE, -1, 1);
-    // Drag down to pull back, like a stick.
-    stickPitch = clamp((e.clientY - stickY) / STICK_RANGE, -1, 1);
-  });
-  const dropStick = (e) => {
-    if (e.pointerId !== stickId) return;
-    stickId = null;
-    stickPitch = 0;
-    stickRoll = 0;
-  };
-  stickZone.addEventListener('pointerup', dropStick);
-  stickZone.addEventListener('pointercancel', dropStick);
+  joy.addEventListener('pointermove', (e) => { if (e.pointerId === joyId) joyFrom(e); });
+  const joyUp = (e) => { if (e.pointerId === joyId) releaseJoy(); };
+  joy.addEventListener('pointerup', joyUp);
+  joy.addEventListener('pointercancel', joyUp);
 
+  // ---- buttons --------------------------------------------------------------
   const tapButton = (id, code) => {
     const el = $(id);
     el.addEventListener('pointerdown', (e) => {
@@ -217,12 +166,10 @@ export function initTouch() {
   brakeBtn.addEventListener('pointercancel', brakeUp);
   brakeBtn.addEventListener('pointerleave', brakeUp);
 
-  $('t-center').addEventListener('pointerdown', (e) => { recentre(); e.preventDefault(); });
-
   return {
     // --- axes, read by input.js ---
-    pitch: () => (mode === 'tilt' ? tiltPitch : stickPitch),
-    roll: () => (mode === 'tilt' ? tiltRoll : stickRoll),
+    pitch: () => pitch,
+    roll: () => roll,
     yaw: () => 0,
     throttle: () => 0,
     throttleAbs: () => (throttleTouched ? throttle : null),
@@ -231,35 +178,20 @@ export function initTouch() {
     endFrame: () => taps.clear(),
 
     // --- lifecycle ---
-    async enable() {
-      root.classList.remove('hidden');
-      const ok = await requestTilt();
-      if (!ok) setMode('stick');
-      return ok;
-    },
+    enable() { root.classList.remove('hidden'); },
     disable() {
       root.classList.add('hidden');
       braking = false;
       taps.clear();
+      releaseJoy();
     },
-    /** True once the sensor has actually produced a reading. */
-    get live() { return sawOrientation; },
     get mode() { return mode; },
-    recentre,
-    setMode,
-    setInvert(which, value) {
-      if (which === 'pitch') invertPitch = value; else invertRoll = value;
-      Save.setTouch({ invertPitch, invertRoll });
+    setMode(next) {
+      mode = next;
+      releaseJoy();
+      document.body.classList.toggle('arrows-mode', mode === 'arrows');
+      Save.setTouch({ mode });
     },
-    get inverted() { return { pitch: invertPitch, roll: invertRoll }; },
     resetThrottle() { setThrottle(0); throttleTouched = false; },
   };
-
-  function setMode(next) {
-    mode = next;
-    stickPitch = 0;
-    stickRoll = 0;
-    document.body.classList.toggle('stick-mode', mode === 'stick');
-    Save.setTouch({ mode });
-  }
 }

@@ -11,7 +11,7 @@ import { createTerrain, airportYOf, WORLD_SIZE } from '../src/terrain.js';
 import { createAirport } from '../src/airport.js';
 import { buildRoute, buildCanyonRoute, RingSet } from '../src/rings.js';
 import { createCanyon } from '../src/canyon.js';
-import { tiltToScreen, shapeTilt } from '../src/touch.js';
+import { padToAxes } from '../src/touch.js';
 import { createCity } from '../src/scenery.js';
 import { Plane, TUNE, NITRO } from '../src/plane.js';
 
@@ -711,60 +711,57 @@ function flyMission(w) {
   };
 }
 
-// --- phone tilt -------------------------------------------------------------
-// The device-to-screen mapping and the response curve, checked here because on
-// an actual phone a wrong sign just feels vaguely bad rather than failing.
-function checkTilt() {
-  const near = (a, b, msg) => ok(Math.abs(a - b) < 1e-6, `${msg} (got ${a.toFixed(3)})`);
+// --- phone stick -------------------------------------------------------------
+// The thumb-offset to pitch/roll mapping, for both the analogue stick and the
+// 8-way arrow pad that share one spot on screen.
+function checkPad() {
+  const R = 100;
+  const stick = (dx, dy) => padToAxes(dx, dy, R, 'stick');
+  const arrows = (dx, dy) => padToAxes(dx, dy, R, 'arrows');
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
 
-  // Portrait: the axes pass straight through.
-  let t = tiltToScreen(10, 4, 0);
-  near(t.pitch, 10, 'portrait pitch is not beta');
-  near(t.roll, 4, 'portrait roll is not gamma');
+  // Sense matches the keyboard: up is W (nose down), down is S (nose up),
+  // right is D. Getting this backwards is the classic phone-controls bug.
+  for (const [name, f] of [['stick', stick], ['arrows', arrows]]) {
+    ok(near(f(0, R).pitch, 1), `${name}: pulling down does not pitch the nose up`);
+    ok(near(f(0, -R).pitch, -1), `${name}: pushing up does not pitch the nose down`);
+    ok(near(f(R, 0).roll, 1), `${name}: right does not roll right`);
+    ok(near(f(-R, 0).roll, -1), `${name}: left does not roll left`);
+    const c = f(0, 0);
+    ok(c.pitch === 0 && c.roll === 0, `${name}: centre is not neutral`);
+  }
 
-  // Landscape one way, then the other: the axes swap and one of them flips.
-  t = tiltToScreen(10, 4, 90);
-  near(t.pitch, 4, 'landscape-90 pitch should come from gamma');
-  near(t.roll, -10, 'landscape-90 roll should be -beta');
+  // Stick: deadzone, smooth start, monotonic, and never beyond the rim.
+  const small = stick(0.08 * R, 0);
+  ok(small.roll === 0, 'stick: deadzone does not swallow a small offset');
+  ok(stick(0.13 * R, 0).roll < 0.02, 'stick: output jumps at the edge of the deadzone');
+  ok(stick(0.3 * R, 0).roll < stick(0.6 * R, 0).roll, 'stick: response is not increasing');
+  ok(near(stick(5 * R, 0).roll, 1), 'stick: dragging past the rim does not hold full');
+  const d = stick(3 * R, 3 * R);
+  ok(Math.hypot(d.roll, d.pitch) <= 1 + 1e-9, 'stick: a diagonal escapes the unit circle');
+  ok(d.roll > 0.6 && d.pitch > 0.6, 'stick: diagonals do not give both axes');
 
-  t = tiltToScreen(10, 4, 270);
-  near(t.pitch, -4, 'landscape-270 pitch should be -gamma');
-  near(t.roll, 10, 'landscape-270 roll should be beta');
-
-  // Upside down flips both.
-  t = tiltToScreen(10, 4, 180);
-  near(t.pitch, -10, 'inverted pitch should be -beta');
-  near(t.roll, -4, 'inverted roll should be -gamma');
-
-  // The two landscape orientations must be opposites of each other, or the
-  // game plays differently depending on which way you turned the phone.
-  const a = tiltToScreen(17, -6, 90);
-  const b = tiltToScreen(17, -6, 270);
-  near(a.pitch, -b.pitch, 'the two landscape modes disagree on pitch');
-  near(a.roll, -b.roll, 'the two landscape modes disagree on roll');
-
-  // Response curve.
-  ok(shapeTilt(0) === 0, 'centre is not neutral');
-  ok(shapeTilt(2) === 0, 'deadzone does not suppress a small tilt');
-  ok(shapeTilt(-2) === 0, 'deadzone is not symmetric');
-  ok(Math.abs(shapeTilt(60) - 1) < 1e-9, 'a big tilt does not reach full deflection');
-  ok(Math.abs(shapeTilt(-60) + 1) < 1e-9, 'a big negative tilt does not reach -1');
-  ok(shapeTilt(9) > 0 && shapeTilt(9) < shapeTilt(16),
-    'the response is not increasing with tilt');
-  ok(shapeTilt(9) < 0.35,
-    `small tilts are too sharp (${shapeTilt(9).toFixed(2)} at 9 degrees)`);
-  for (const d of [-90, -30, 0, 5, 30, 90, 1e6]) {
-    const v = shapeTilt(d);
-    ok(v >= -1 && v <= 1, `shapeTilt(${d}) left the -1..1 range`);
-    ok(Math.sign(v) === Math.sign(d) || v === 0, `shapeTilt(${d}) flipped sign`);
+  // Arrows: behave like keys — only -1, 0 or +1, with real diagonals.
+  const dg = arrows(R, R);
+  ok(dg.roll === 1 && dg.pitch === 1, 'arrows: down-right diagonal does not press both');
+  const dg2 = arrows(-R, -R);
+  ok(dg2.roll === -1 && dg2.pitch === -1, 'arrows: up-left diagonal does not press both');
+  ok(arrows(R, 0.2 * R).pitch === 0, 'arrows: a near-horizontal push leaks into pitch');
+  ok(arrows(0.2 * R, 0).roll === 0, 'arrows: a small offset registers as a press');
+  for (let a = 0; a < 360; a += 7) {
+    const r = (a * Math.PI) / 180;
+    const o = arrows(Math.cos(r) * R * 0.9, Math.sin(r) * R * 0.9);
+    ok([-1, 0, 1].includes(o.roll) && [-1, 0, 1].includes(o.pitch),
+      `arrows: ${a} deg gave a value that is not a key press`);
+    ok(o.roll !== 0 || o.pitch !== 0, `arrows: ${a} deg at 90% travel registers nothing`);
   }
 }
 
 // --- run -------------------------------------------------------------------
 console.log('');
-console.log('\x1b[1mPhone tilt\x1b[0m');
-checkTilt();
-console.log('  mapping and response curve checked for all four screen orientations\n');
+console.log('\x1b[1mPhone stick\x1b[0m');
+checkPad();
+console.log('  stick and arrow-pad mapping checked\n');
 
 for (const cfg of LEVELS) {
   console.log(`\x1b[1m${cfg.name}\x1b[0m`);

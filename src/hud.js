@@ -17,6 +17,9 @@ const el = {
   level: $('lvl-name'),
   gear: $('gear-chip'),
   nitro: $('nitro-chip'),
+  // On-screen buttons on a phone double as the gear and nitro indicators.
+  tGear: $('t-gear'),
+  tNitro: $('t-nitro'),
   arrow: $('arrow'),
   banner: $('banner'),
   stall: $('stall'),
@@ -60,6 +63,18 @@ export const HUD = {
       el.nitro.textContent = 'NITRO READY';
       el.nitro.className = 'chip good';
     }
+
+    const g = el.tGear.classList;
+    g.toggle('st-good', locked);
+    g.toggle('st-warn', !locked && !retracted);
+    g.toggle('st-bad', retracted);
+
+    const cooling = !s.nitroActive && s.nitroCooldown > 0;
+    const n = el.tNitro.classList;
+    n.toggle('st-bad', !cooling);
+    n.toggle('st-burn', !!s.nitroActive);
+    n.toggle('st-cool', cooling);
+    el.tNitro.textContent = cooling ? String(Math.ceil(s.nitroCooldown)) : 'N';
 
     el.stall.classList.toggle('on', !!s.stalling);
   },

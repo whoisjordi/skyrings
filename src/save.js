@@ -52,7 +52,7 @@ export const Save = {
   get invertPitch() { return state.invertPitch; },
   set invertPitch(v) { state.invertPitch = !!v; flush(); },
 
-  /** Touch/tilt preferences: control mode, axis inversion, tilt zero point. */
+  /** Phone control preferences: currently just stick or arrows. */
   get touch() { return state.touch ?? {}; },
   setTouch(patch) {
     state.touch = { ...(state.touch ?? {}), ...patch };

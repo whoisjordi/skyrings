@@ -60,26 +60,26 @@ is the trade that makes it a decision rather than a free button.
 
 Open the same URL. The game detects a coarse pointer and switches controls:
 
-- **Tilt** the phone to pitch and roll. The zero point is captured when you
-  start flying, not taken from gravity, so it works at whatever angle you are
-  actually holding it — and the ⌖ button re-centres it mid-flight.
-- **Throttle** is the slider down the left edge. It stays where you put it.
-- **G / B / N** are the buttons down the right edge: gear, brake, nitro.
-- Landscape is better, and the game says so in portrait.
+- **Throttle** — slider, bottom left. It stays where you put it.
+- **Stick** — bottom right. Pull down to climb and push up to dive, the same
+  sense as `S` and `W`. It is analogue, and that matters here: how tight a turn
+  gets depends on the *square* of how hard you pull, so easing into a turn is
+  something keys cannot do.
+- **G / B / N** — the row just above the stick. They also show state: G is
+  green, amber or red for gear down, travelling or up; N counts down its
+  recharge.
+- **Arrows instead of the stick** — switch in Pause. Same spot, same thumb, but
+  snapped to −1/0/+1 like keys, with diagonals across eight 45° sectors.
 
-iOS will not send orientation events until the page asks from inside a tap, so
-permission is requested on the Fly button. If it is refused — or the sensor
-never reports within about two seconds — the game falls back to **drag to fly**
-and says so. You can also switch modes by hand in the pause menu.
+The bottom HUD boxes are hidden on a phone, since the slider and the buttons
+now carry that information, and the controls respect the notch safe areas.
 
-If pitch or roll feels backwards, Pause has **Tilt: invert pitch / invert
-roll**. The two landscape orientations are mirror images of one another, which
-is checked in the test suite, so one setting holds whichever way you turn the
-phone.
+An earlier build steered by tilting the phone. It did not fly well and was
+removed; it is in the history at `bef6f2f`.
 
-The desktop build is untouched by any of this: the touch controls are an
-auxiliary input source that *adds* to the keyboard axes rather than replacing
-them.
+The desktop build is untouched: phone controls are an auxiliary input source
+that *adds* to the keyboard axes rather than replacing them, and a touchscreen
+laptop with a mouse keeps the keyboard layout.
 
 ## Running it locally
 
@@ -110,7 +110,7 @@ src/camera.js   chase and cockpit cameras
 src/hud.js      DOM HUD, off-screen target arrow
 src/audio.js    synthesised engine, chimes and crash noise (no audio files)
 src/input.js    keyboard state, plus an optional auxiliary source
-src/touch.js    phone controls: tilt, throttle slider, on-screen buttons
+src/touch.js    phone controls: stick or arrow pad, throttle slider, buttons
 src/save.js     localStorage best times and unlocks
 src/levels.js   the four missions as data
 test/harness.mjs headless checks — see "Tests"
@@ -280,10 +280,11 @@ import `three`. The suite builds every level and asserts:
   inside the walls and below the rim, the chords between them stay between the
   walls, the departure and approach gates are outside it, and the gorge keeps
   well clear of the runway.
-- **Phone tilt** — the device-to-screen axis mapping for all four screen
-  orientations (including that the two landscape modes are exact opposites),
-  and the response curve: deadzone, full deflection at the limits, monotonic,
-  sign-preserving and always within range.
+- **Phone stick** — pull-down climbs and push-up dives for both the stick and
+  the arrows, matching the keyboard; the stick has a deadzone with no jump at
+  its edge, rises monotonically and never leaves the unit circle; the arrows
+  only ever produce key-like −1/0/+1, with real diagonals, and register in
+  every direction at 90% travel.
 - **Line of sight** — on every mission the first gate is within 35° of the
   runway centreline, no gate turns more than 70° to reach the next, no leg is
   longer than the fog, and the last gate is far enough out and low enough to
@@ -309,8 +310,8 @@ smoke signal, not a specification.
       thread gates under the current one even after learning to pull in turns
 - [ ] Gamepad support via the Gamepad API
 - [ ] Phone: a rudder control (yaw is currently keyboard-only)
-- [ ] Phone: confirm the default tilt directions on a real device — the axis
-      maths is tested but which way feels natural is not
+- [ ] Phone: pick stick or arrows as the default once both have been flown
+- [ ] Phone: a left-handed layout that swaps stick and throttle
 - [ ] More missions, and a seed field so you can generate your own
 - [ ] A second canyon level, or a seed for the gorge shape
 - [ ] Canyon walls could use strata banding rather than one flat rock colour

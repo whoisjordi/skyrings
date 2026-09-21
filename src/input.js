@@ -23,7 +23,7 @@ export function initInput() {
 
 const down = (...codes) => codes.some((c) => held.has(c));
 
-// An auxiliary source (the on-screen/tilt controls) ADDS to the keyboard
+// An auxiliary source (the on-screen phone controls) ADDS to the keyboard
 // rather than replacing it, so a machine with both keeps both and the desktop
 // path is byte-for-byte what it was.
 let aux = null;
