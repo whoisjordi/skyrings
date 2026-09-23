@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { initInput, Input, setAuxInput } from './input.js';
 import { initTouch } from './touch.js';
+import { createAutopilot } from './autopilot.js';
 import { Save } from './save.js';
 import { LEVELS, formatTime } from './levels.js';
 import { createTerrain, WORLD_SIZE, airportYOf, setTerrainQuality } from './terrain.js';
@@ -62,7 +63,7 @@ let level = null;          // built world for the current mission
 let levelIndex = 0;
 let state = 'menu';        // menu | flying | paused | result
 let run = null;            // per-attempt state
-let menuAngle = 0;
+let demo = null;           // autopilot flying behind the menus
 
 function disposeLevel() {
   if (!level) return;
@@ -102,8 +103,50 @@ function loadLevel(index) {
   scene.add(root);
 
   level = { cfg, root, terrain, airport, canyon, gates, rings, city, plane };
+  demo = createAutopilot(level);
   HUD.setLevel(cfg.name);
   resetRun();
+}
+
+/** Puts the aeroplane back on the runway and lets the autopilot fly again. */
+function restartDemo() {
+  resetRun();
+  if (demo) demo.reset();
+  chase.snap();
+}
+
+/**
+ * Attract mode: the same autopilot, flying the loaded mission behind the
+ * menus. It is scored by nothing and recorded nowhere — on a crash, a
+ * completed landing, or a spell with no progress, it simply starts again.
+ */
+function runDemo(dt) {
+  const { plane, rings, airport, terrain, city } = level;
+
+  acc += dt;
+  let steps = 0;
+  while (acc >= STEP && steps < MAX_STEPS) {
+    acc -= STEP;
+    steps += 1;
+
+    const event = plane.update(STEP, demo.update(STEP, plane, rings),
+      { heightAt: terrain.heightAt, airport });
+    rings.update(STEP, plane.position);
+
+    const hitTower = city && !plane.onGround
+      && city.collides(plane.position.x, plane.position.y, plane.position.z);
+    const landed = rings.done && plane.onGround && plane.speed < STOPPED;
+    const lost = demo.stuck
+      || Math.hypot(plane.position.x, plane.position.z) > HARD_BOUND;
+
+    if ((event && event.type !== 'takeoff') || hitTower || landed || lost) {
+      restartDemo();
+      break;
+    }
+  }
+  if (acc > STEP * MAX_STEPS) acc = 0;
+
+  chase.update(dt, plane, plane.speed / TUNE.maxSpeed, plane.nitroBlend);
 }
 
 function resetRun() {
@@ -300,19 +343,8 @@ function frame(now) {
     // No restart key in flight: R sits next to the flying keys and a stray
     // press throws away a good run. Restarting is a menu decision.
     if (Input.tapped('Escape') || Input.tapped('KeyP')) pause();
-  } else if (state === 'menu' && level) {
-    // Slow orbit over the field behind the title card.
-    menuAngle += dt * 0.09;
-    const c = level.airport.center;
-    camera.up.set(0, 1, 0);
-    camera.position.set(
-      c.x + Math.cos(menuAngle) * 720,
-      c.y + 300,
-      c.z + Math.sin(menuAngle) * 720,
-    );
-    camera.lookAt(c.x, c.y + 40, c.z);
-    camera.fov = 60;
-    camera.updateProjectionMatrix();
+  } else if (state === 'menu' && level && demo) {
+    runDemo(dt);
   }
 
   Input.endFrame();
@@ -383,6 +415,7 @@ function resume() {
 function toMenu() {
   state = 'menu';
   HUD.show(false);
+  restartDemo();
   if (touch) touch.disable();
   Audio.stopEngine();
   buildLevelList();
@@ -468,6 +501,7 @@ addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 
 initInput();
 loadLevel(0);
+last = performance.now();
 buildLevelList();
 showScreen('title');
 $('loading').classList.add('hidden');

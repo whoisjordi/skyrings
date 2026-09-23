@@ -80,6 +80,37 @@ The desktop build is untouched: phone controls are an auxiliary input source
 that *adds* to the keyboard axes rather than replacing them, and a touchscreen
 laptop with a mouse keeps the keyboard layout.
 
+## The demo
+
+The title and mission screens are not a static backdrop: an autopilot is
+flying the loaded mission behind them, under the same physics and the same
+landing rules as a player. It is scored by nothing and recorded nowhere, and
+restarts on a crash, a completed landing, or 25 seconds without reaching a
+gate.
+
+It leans on a guarantee the route generator already provides — that the
+straight line between consecutive gates clears the ground — so it does no path
+planning and no terrain avoidance. What it does:
+
+- **Aims at a point on the current leg, a lookahead ahead, clamped at the next
+  gate.** The clamp is what makes it fly *through* rings rather than past them:
+  letting the lookahead spill onto the next leg cuts the corner by about 39
+  units, against rings of 34–46.
+- **Banks for the curvature the geometry needs**, `2·sin(bearing)/range`,
+  inverted through the model's own turn relation. A gain proportional to
+  bearing error looks reasonable and does not work: a 13° error asks for 24° of
+  bank, which turns too slowly to ever close it.
+- **Brakes for the corner.** Turn radius goes with the *square* of speed, so
+  arriving too fast is not something steering can rescue. Each gate has a
+  target speed derived from the corner that follows it.
+- **Pitch holds the flight path and nothing else**, aimed at the gate's own
+  height rather than the lookahead point's. Every attempt to borrow pitch for
+  turning — a bank-proportional pull, or climbing through corners — turned
+  faster and ballooned 87 units over the gates, which is a miss just the same.
+
+**It does not yet complete a mission.** It flies about half of Green Valley
+cleanly, most gates dead centre, then loses one and goes around. See the TODO.
+
 ## Running it locally
 
 ES modules will not load from `file://`, so serve the folder over HTTP:
@@ -105,6 +136,7 @@ src/airport.js  runway geometry, touchdown judging, approach info
 src/rings.js    route generation, terrain clearance, gate crossing detection
 src/canyon.js   the carved gorge: centreline, depth profile, distance queries
 src/scenery.js  sky, lighting, clouds, instanced city with collision
+src/autopilot.js path-following autopilot; flies the attract-mode demo
 src/camera.js   chase and cockpit cameras
 src/hud.js      DOM HUD, off-screen target arrow
 src/audio.js    synthesised engine, chimes and crash noise (no audio files)
@@ -305,8 +337,13 @@ smoke signal, not a specification.
 - [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
 - [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
 - [ ] Ghost replay of your best run
-- [ ] The flight probe was written for the old bank-turns-you model and cannot
-      thread gates under the current one even after learning to pull in turns
+- [ ] The autopilot stalls out around gate 9 of 18 on Green Valley and gate 3
+      of 30 on City Towers, at the same gates whatever the speed — so it is not
+      a turn-radius limit but something structural about chained short legs in
+      the crosswind arc. Cross-track control along the leg, instead of pure
+      pursuit to the gate, is the next thing to try
+- [ ] Once it completes a mission, retire the weak flight probe in the test
+      suite and assert route completability with the real autopilot instead
 - [ ] Gamepad support via the Gamepad API
 - [ ] Phone: a rudder control (yaw is currently keyboard-only)
 - [ ] Phone: pick stick or arrows as the default once both have been flown
