@@ -297,7 +297,8 @@ function frame(now) {
       }
     }
     if (Input.tapped('KeyC')) chase.toggle();
-    if (Input.tapped('KeyR')) resetRun();
+    // No restart key in flight: R sits next to the flying keys and a stray
+    // press throws away a good run. Restarting is a menu decision.
     if (Input.tapped('Escape') || Input.tapped('KeyP')) pause();
   } else if (state === 'menu' && level) {
     // Slow orbit over the field behind the title card.

@@ -35,8 +35,7 @@ The design brief was deliberately narrow:
 | `G` | Landing gear up / down |
 | `N` | Nitro boost |
 | `C` | Chase / cockpit camera |
-| `R` | Restart mission |
-| `Esc` | Pause |
+| `Esc` | Pause (restart lives here, not on a key) |
 
 Hold `Shift` to full power, wait for about 55 knots, then pull back on `S`.
 The blue gate is the next one; the arrow at the edge of the screen points to it
