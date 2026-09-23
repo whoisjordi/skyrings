@@ -41,6 +41,13 @@ export const TUNE = {
   groundDrag: 2.5,
   brakeDecel: 34,      // wheel brakes: ~100kt to a standstill in about 3s
   airbrake: 5,
+  // The airbrake stops biting as the wing runs out of margin. Without this it
+  // is a trap: braking is the obvious way to slow down for a landing, and it
+  // drags you below mushSpeed, where the nose sags and you sink whatever the
+  // elevator is asking for. Now it bleeds off speed and simply stops at a
+  // flyable approach speed.
+  airbrakeFadeFrom: 92,
+  airbrakeFadeTo: 74,
   clearance: 2.4,      // how close the belly gets before it counts as contact
   waterline: 0.5,      // sea level contact height
   gearDragFactor: 0.8,   // drag multiplier with the gear up -> ~153kt vs 131
@@ -175,6 +182,11 @@ export class Plane {
   /** True while the wing is not producing enough lift. */
   get stalling() { return !this.onGround && this.speed < TUNE.stall; }
 
+  /** Slow enough that the nose is starting to sag, but not yet stalled. */
+  get mushing() {
+    return !this.onGround && this.speed < TUNE.mushSpeed && this.speed >= TUNE.stall;
+  }
+
   _rotateLocal(axis, angle) {
     if (!angle) return;
     this.quaternion.multiply(Q.a.setFromAxisAngle(axis, angle));
@@ -283,11 +295,18 @@ export class Plane {
     const pull = clamp(ctrl.pitch, 0, 1);
     const load = 1 + TUNE.pullLoad * pull * pull;
 
+    const airbrake = ctrl.brake
+      ? TUNE.airbrake * clamp(
+        (this.speed - TUNE.airbrakeFadeTo)
+          / (TUNE.airbrakeFadeFrom - TUNE.airbrakeFadeTo), 0, 1,
+      )
+      : 0;
+
     const accel = thrust * this.throttle
       - drag * this.speed * this.speed
       - TUNE.gravity * fwdY
       - TUNE.turnDrag * (load * load - 1)
-      - (ctrl.brake ? TUNE.airbrake : 0);
+      - airbrake;
 
     // The boost needs headroom above the ordinary ceiling to be worth anything.
     const cap = TUNE.maxSpeed * (1 + this.nitroBlend * (NITRO.speedCapMult - 1));

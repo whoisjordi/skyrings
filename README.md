@@ -31,7 +31,7 @@ The design brief was deliberately narrow:
 | `A` / `D` | Roll left / right |
 | `Q` / `E` | Rudder |
 | `Shift` / `Ctrl` | Throttle up / down |
-| `B` | Wheel brakes on the ground, airbrake in the air (`Space` also works) |
+| `B` | Wheel brakes on the ground, airbrake in the air (`Space` also works). The airbrake fades out near approach speed, so it cannot slow you into a sink |
 | `G` | Landing gear up / down |
 | `N` | Nitro boost |
 | `C` | Chase / cockpit camera |
@@ -174,6 +174,10 @@ vector. The whole of the aerodynamics is:
   the *square* of the input so easing the nose up is nearly free, and induced
   drag is charged on `n² − 1`. A gentle turn holds speed; a hard one at 50° of
   bank drops you from 120 kt to about 92 kt in two seconds.
+- **The airbrake fades out** between 92 and 74 kt. It is the obvious thing to
+  press to slow down for a landing, and at full strength it dragged the
+  aeroplane below the speed where the nose sags — a stable approach turned into
+  a 55 units/s dive against a touchdown limit of 15.
 - **Slow flight goes vague.** Control authority fades with airspeed and the
   turn rate falls with its *square*, so a 60 kt turn is a third of a 120 kt
   one. Below 70 kt the wing runs out of margin: the nose sags and you sink,
@@ -295,8 +299,10 @@ import `three`. The suite builds every level and asserts:
   four times as far; a gentle turn holds speed and a hard one sheds 20 kt+; a
   60 kt turn is under 60 % of a 120 kt one and a 45 kt climb loses height; and
   hands-off wings take between 4 s and 30 s to level.
-- **Brakes, gear and nitro** — braking stops a 100 kt roll inside the runway
-  and beats coasting; the gear is faster up, is refused on the ground, and does
+- **Brakes, gear and nitro** — braking on a stable approach neither drags the
+  aeroplane into the sagging band nor builds a descent that would break the
+  touchdown limit, while still rescuing an arrival that is too fast; braking
+  stops a 100 kt roll inside the runway and beats coasting; the gear is faster up, is refused on the ground, and does
   not count as down mid-travel; a gear-up arrival slides instead of landing;
   nitro surges, cannot be re-armed mid-burn, expires on time, recharges on
   time, and does not run into its own speed ceiling — if the cap swallowed the

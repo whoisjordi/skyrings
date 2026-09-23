@@ -364,6 +364,44 @@ function checkPhysics(cfg, w) {
       `nitro snaps on instead of ramping (blend ${ramping.nitroBlend.toFixed(2)})`);
   }
 
+  // Braking on approach must not fly the aeroplane into the ground.
+  //
+  // The airbrake is the obvious thing to press to slow down for a landing, and
+  // it used to drag the aeroplane below the speed where the nose sags and it
+  // sinks whatever the elevator asks — a stable approach turned into an 11
+  // units/s descent and a hard arrival. The elevator here is deliberately
+  // gentle, like someone trimmed for the approach rather than fighting it.
+  {
+    const p2 = aloft(95);
+    p2.throttle = 0.35;
+    let worstDescent = 0;
+    for (let i = 0; i < 25 * 120; i++) {
+      const fpa = Math.asin(clamp(p2.forward.y, -1, 1));
+      p2.update(STEP, {
+        pitch: clamp((-0.06 - fpa) * 3.5, -1, 1),
+        roll: 0, yaw: 0, throttle: 0, throttleAbs: 0.35, brake: true,
+      }, air);
+      worstDescent = Math.max(worstDescent, -p2.velocity.y);
+    }
+    ok(p2.speed >= TUNE.mushSpeed,
+      `the airbrake drags the aeroplane into the mush band (${p2.speed.toFixed(0)}kt,`
+      + ` sagging starts at ${TUNE.mushSpeed})`);
+    ok(worstDescent < 8,
+      `braking on a stable approach builds ${worstDescent.toFixed(1)} units/s of descent`
+      + ' (touchdown limit is 15)');
+
+    // ...but it must still be able to rescue an arrival that is too fast.
+    const p3 = aloft(135);
+    for (let i = 0; i < 12 * 120; i++) {
+      const fpa = Math.asin(clamp(p3.forward.y, -1, 1));
+      p3.update(STEP, {
+        pitch: clamp((-0.06 - fpa) * 3.5, -1, 1),
+        roll: 0, yaw: 0, throttle: 0, throttleAbs: 0, brake: true,
+      }, air);
+    }
+    ok(p3.speed < 100, `the airbrake no longer slows a fast arrival (${p3.speed.toFixed(0)}kt)`);
+  }
+
   // Stall, then recovery.
   let minSpeed = Infinity, stalled = false;
   for (let i = 0; i < 2400; i++) {

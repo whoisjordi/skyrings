@@ -76,7 +76,10 @@ export const HUD = {
     n.toggle('st-cool', cooling);
     el.tNitro.textContent = cooling ? String(Math.ceil(s.nitroCooldown)) : 'N';
 
-    el.stall.classList.toggle('on', !!s.stalling);
+    // Amber before red: the aeroplane starts sagging well before it stalls,
+    // and without a warning that just reads as the controls giving up.
+    el.stall.classList.toggle('on', !!s.stalling || !!s.mushing);
+    el.stall.classList.toggle('caution', !s.stalling && !!s.mushing);
   },
 
   /**

@@ -317,6 +317,7 @@ function frame(now) {
       total: rings.total,
       target: cfg.target,
       stalling: plane.stalling,
+      mushing: plane.mushing,
     });
     camera.updateMatrixWorld();
     HUD.updateArrow(rings.done ? airport.center : rings.next.position, camera);
