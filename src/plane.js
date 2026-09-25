@@ -419,12 +419,23 @@ export class Plane {
           this.velocity.y = 0;
         }
 
-        // You cannot land until you have actually left. Without this, the
-        // frames just after rotation — wheels a hair off the tarmac, wing
-        // coming up into the first turn — are judged as an arrival.
-        if (!this.clearedRunway || this.airborneFor < TUNE.takeoffGrace) return null;
+        // Straight after rotation the wheels are a hair off the tarmac and a
+        // wing may be coming up into the first turn; those frames must not be
+        // judged as an arrival.
+        if (this.airborneFor < TUNE.takeoffGrace) return null;
+
+        // Before landing is armed, only skimming is ignored — never actual
+        // contact. Ignoring contact left the aeroplane held on the tarmac but
+        // still flying: no wheels, no brakes (B was the airbrake), and the
+        // slow-flight sag free to rotate the nose down while it rolled.
+        if (!this.clearedRunway && gap > 0) return null;
         return ap.evaluateTouchdown(this);
       }
+
+      // Anywhere off the strip counts as having left it. Arming used to need
+      // 15 units above the runway itself, which a shallow climb-out never
+      // reaches before the far end — so the next landing was never armed.
+      this.clearedRunway = true;
 
       if (y <= TUNE.waterline) {
         this.position.set(x, TUNE.waterline, z);

@@ -580,6 +580,47 @@ function checkGround(cfg, w) {
     lowest = Math.min(lowest, plane.position.y - airport.surfaceY);
   }
   ok(lowest > -0.5, `un-armed descent sank ${(-lowest).toFixed(1)} through the runway`);
+
+  // A shallow climb-out followed by a low, flat final must still LAND.
+  //
+  // Landing used to arm only after climbing 15 units above the runway itself.
+  // Leave the strip lower than that and the next arrival was never armed: the
+  // aeroplane was held on the tarmac but kept flying, with no wheels and no
+  // wheel brake, while slow-flight sag rotated the nose down as it rolled.
+  {
+    const p2 = new Plane(cfg.palette);
+    p2.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
+    for (let i = 0; i < 120 * 30; i++) {
+      const fpa = Math.asin(clamp(p2.forward.y, -1, 1));
+      const pitch = p2.onGround ? (p2.speed >= TUNE.rotateSpeed ? 1 : 0)
+        : clamp((0.02 - fpa) * 4, -1, 1);                     // barely climbing
+      p2.update(STEP, { pitch, roll: 0, yaw: 0, throttle: 0, throttleAbs: 1, brake: false }, world);
+      if (!p2.onGround && !airport.contains(p2.position.x, p2.position.z)) break;
+    }
+
+    const fin = airport.center.clone().addScaledVector(airport.axis, -900);
+    p2.position.set(fin.x, airport.surfaceY + 10, fin.z);   // below the old 15
+    p2._prevPos.copy(p2.position);
+    p2.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), airport.start.heading);
+    p2.speed = 80; p2.airborneFor = 99;
+
+    let event = null, flyingOnTarmac = 0;
+    for (let i = 0; i < 120 * 40 && !event; i++) {
+      const fpa = Math.asin(clamp(p2.forward.y, -1, 1));
+      const want = airport.approachInfo(p2).along > 450 ? 0 : -0.03;
+      const onTarmac = airport.contains(p2.position.x, p2.position.z)
+        && p2.position.y - airport.surfaceY < 0.5;
+      event = p2.update(STEP, {
+        pitch: clamp((want - fpa) * 4, -1, 1), roll: 0, yaw: 0, throttle: 0,
+        throttleAbs: onTarmac ? 0 : 0.3, brake: onTarmac,
+      }, world);
+      if (onTarmac && !p2.onGround) flyingOnTarmac += STEP;
+    }
+    ok(event && event.type === 'touchdown',
+      `low landing after a shallow climb-out gave ${event ? event.type + ' ' + (event.reason ?? '') : 'no event'}`);
+    ok(flyingOnTarmac < 0.2,
+      `aeroplane spent ${flyingOnTarmac.toFixed(1)}s on the tarmac still in flight mode`);
+  }
 }
 
 // --- gate detection --------------------------------------------------------

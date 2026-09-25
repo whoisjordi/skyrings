@@ -310,7 +310,9 @@ import `three`. The suite builds every level and asserts:
   during a burn.
 - **Solid ground** — diving into terrain at top speed, planting it on the
   runway from 500 units up, and descending onto the runway before ever having
-  climbed away all leave the aeroplane on the surface, never inside it.
+  climbed away all leave the aeroplane on the surface, never inside it; and a
+  shallow climb-out followed by a low, flat final still lands, rather than
+  leaving the aeroplane held on the tarmac in flight mode.
 - **Worlds** — the apron is flat, the start point is on the runway, gates clear
   the terrain and sit inside the map, and every route leg clears the ground.
 - **The canyon** — it is long, the gates in the gorge are one unbroken run
