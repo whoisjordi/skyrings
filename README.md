@@ -159,8 +159,9 @@ vector. The whole of the aerodynamics is:
 - **Energy.** `speed += (thrust·throttle − drag·v² − gravity·forward.y)·dt`.
   Climbing bleeds speed, diving gains it. `gravity > thrust`, so you cannot
   climb vertically for ever.
-- **Roll is a rate, with no ceiling.** Hold `A`/`D` and the aeroplane keeps
-  rolling, straight through inverted — about 0.7 s to go over at cruise. Hands
+- **Roll is a rate, with no ceiling.** Hold `A`/`D` (or the arrow keys) and the
+  aeroplane keeps rolling, straight through inverted: about 0.8 s from level to
+  upside down at cruise. Hands
   off, the wings wash back to level slowly enough (≈10 s from 40°) that you can
   set a bank and fly a turn on it.
 - **Turning comes from lift, not from bank.** Lift acts out of the top of the
@@ -170,6 +171,13 @@ vector. The whole of the aerodynamics is:
   back-pressure gives about 175°. Deriving this from the lift vector rather
   than from a bank angle keeps it correct inverted and at 90° of bank, where
   an `asin(bank)` formula folds back on itself.
+- **Lift only holds you up while it points up.** Up to about 50° of bank
+  nothing changes. Beyond that gravity starts to win: on a knife edge (90°)
+  the nose falls about 18° in two seconds and the aeroplane sinks, and upside
+  down the wing pushes you toward the ground, so you lose about 60 units of
+  height in two seconds even with the nose on the horizon.
+- **Rudder wags the tail.** Holding `Q`/`E` yaws the nose and adds a quick
+  side-to-side wag (about ±5°, 2.4 times a second), like a snake.
 - **Back-pressure costs speed.** Pull sets a load factor of 1–4 g, rising with
   the *square* of the input so easing the nose up is nearly free, and induced
   drag is charged on `n² − 1`. A gentle turn holds speed; a hard one at 50° of

@@ -17,7 +17,7 @@ export const TUNE = {
   stall: 30,           // below this the wing stops holding you up
   maxSpeed: 190,
   pitchRate: 1.0,      // rad/s at full deflection
-  rollRate: 2.2,
+  rollRate: 3.6,
   yawRate: 0.5,
   turnBank: 22,        // lift coupling at 1g: how much a bank alone bends the path
   turnLoad: 9,         // extra coupling per g of back-pressure
@@ -25,6 +25,16 @@ export const TUNE = {
   turnDrag: 0.7,       // induced drag, paid on load^2 - this is what makes a
                        // hard turn expensive and a gentle one nearly free
   maxTurnRate: 1.2,    // rad/s ceiling, so nothing can spin on the spot
+  // Lift only holds you up while it points up. Past about 50 degrees of bank
+  // it runs out: on a knife edge gravity pulls the nose down, and upside down
+  // the wing pushes you toward the ground even with the nose on the horizon.
+  knifeFrom: 0.35,     // 1 - up.y where the effect starts (about 50 degrees)
+  knifeDrop: 0.22,     // rad/s the nose falls on a knife edge
+  knifeSink: 9,        // sink on a knife edge
+  invertSink: 14,      // extra sink upside down (wing lift pointing at the ground)
+  // Rudder makes the tail wag from side to side, like a snake.
+  wagRate: 1.3,        // rad/s of extra yaw at the peak of each wag
+  wagHz: 2.4,
   autoLevel: 0.2,      // gentle drift back to wings-level, hands off only
   throttleRate: 0.55,  // full travel in ~1.8s
   rotateSpeed: 62,     // runway speed at which the nose will lift
@@ -111,6 +121,7 @@ export class Plane {
     this.nitroTime = 0;       // seconds of boost left
     this.nitroCooldown = 0;   // seconds until it can be used again
     this.nitroBlend = 0;      // smoothed 0..1 actually applied
+    this._wag = 0;            // phase of the rudder wag
     this._prop = this.object.getObjectByName('prop');
     this._gear = this.object.getObjectByName('gear');
   }
@@ -318,6 +329,10 @@ export class Plane {
 
     this._rotateLocal(AX.x, ctrl.pitch * TUNE.pitchRate * authority * dt);
     this._rotateLocal(AX.y, -ctrl.yaw * TUNE.yawRate * authority * dt);
+    if (ctrl.yaw) {
+      this._wag += dt * TUNE.wagHz * Math.PI * 2;
+      this._rotateLocal(AX.y, Math.sin(this._wag) * TUNE.wagRate * authority * dt);
+    } else this._wag = 0;
 
     // Aileron commands a roll RATE, with no ceiling: hold it and the aeroplane
     // keeps rolling straight through inverted, which is what makes aerobatics
@@ -334,6 +349,21 @@ export class Plane {
     if (turn) this.quaternion.premultiply(Q.a.setFromAxisAngle(AX.y, turn * dt));
 
     let sink = 0;
+    // Lift that no longer points up: the nose falls toward the ground on a
+    // knife edge, and the aeroplane sinks, most of all upside down.
+    const upY = this.up.y;
+    const knife = clamp((1 - upY - TUNE.knifeFrom) / (1 - TUNE.knifeFrom), 0, 1);
+    if (knife > 0) {
+      const f = this.forward;
+      const hLen = Math.hypot(f.x, f.z);
+      if (hLen > 0.05) {
+        // rotate the nose toward straight down, about the horizontal axis across the flight path
+        const axis = V.tmp.set(f.z, 0, -f.x).divideScalar(hLen);
+        const drop = TUNE.knifeDrop * knife * (upY > 0 ? 1 : Math.max(0.3, 1 + upY));
+        this.quaternion.premultiply(Q.b.setFromAxisAngle(axis, drop * dt));
+      }
+      sink += TUNE.knifeSink * knife + TUNE.invertSink * clamp(-upY, 0, 1);
+    }
     const mush = clamp(
       1 - (this.speed - TUNE.stall) / (TUNE.mushSpeed - TUNE.stall), 0, 1,
     );
