@@ -135,7 +135,8 @@ src/terrain.js  seeded Perlin terrain, airport apron, departure corridor
 src/airport.js  runway geometry, touchdown judging, approach info
 src/rings.js    route generation, terrain clearance, gate crossing detection
 src/canyon.js   the carved gorge: centreline, depth profile, distance queries
-src/scenery.js  sky, lighting, clouds, instanced city with collision
+src/scenery.js  sky, lighting, clouds
+src/city.js     City Towers: streets, buildings, shader windows, traffic, colliders
 src/autopilot.js path-following autopilot; flies the attract-mode demo
 src/camera.js   chase and cockpit cameras
 src/hud.js      DOM HUD, off-screen target arrow
@@ -246,8 +247,8 @@ Coming back, the circuit has to finish *further out* than the approach gate so
 the last leg runs inbound. Finishing inside it leaves a 180° reversal, and a
 reversal never reads as "ahead of you" however many gates are in it.
 
-On City Towers the buildings are placed *after* the route and any tower within
-170 m of a route leg is skipped, so there is always a lane to fly.
+City Towers is the exception to all of this: there the streets come first and
+the route is threaded down them — see the next section.
 
 ### The canyon
 
@@ -280,6 +281,56 @@ asks you to fly at a gate behind your shoulder. The clearance pass that lifts th
 it flyable instead is spacing: gates every 430 m, close enough that the
 straight line between consecutive ones never strays more than 60 m from the
 centreline, against walls at 150 m.
+
+### The city
+
+City Towers is flown *in* the streets, not over the roofs. Like the canyon, the
+geometry comes first and the route is laid along it, and one config in
+`src/levels.js` describes both.
+
+- **The grid.** North–south and east–west streets, each a centre line and a
+  facade-to-facade width. Boulevards are 120 wide — the narrowest gap a 32-unit
+  ring and a 90-unit turn fit into with room to spare — and the side streets
+  are 60, which you cannot fly down. The blocks are whatever the streets leave.
+  The terrain under the city is levelled to the airfield's height and blends
+  back into the country, and out into the sea on the south side.
+- **Roads.** Every street has a two-lane road with edge lines, a dashed centre
+  line broken at junctions, and zebra crossings. Boulevards add parked cars
+  along both kerbs and a row of plane trees. About 500 cars drive on the right
+  and wrap round at the end of their street. East–west roads stop at the
+  esplanade and run under it, as they do at La Défense.
+- **Buildings.** Three districts. Round the axis, glass towers of 230–640:
+  straight, stepped back in tiers, or round on a podium, with plant rooms and
+  masts. Along every street the route uses, offices of 110–280, so each one is
+  a canyon. Everywhere else, Paris: limestone perimeter blocks round courtyards,
+  six floors, balconies on the second and fifth, slate mansards and chimneys.
+- **Windows** are drawn by the fragment shader from the position on the facade —
+  no textures, no extra geometry, one draw call for every building. The grid is
+  computed in each instance's own scaled space, so it lines up with the
+  building's edges and its floor height; far away it fades to its average
+  colour instead of shimmering. Per-building values are `flat` varyings: an
+  interpolated constant is not quite constant, and the per-window hash turned
+  that last-bit noise into stripes.
+- **Landmarks.** La Grande Arche closes the axis: a hollow cube 220 wide and
+  220 tall on a podium, with a 120-wide opening. Two skybridges, one between
+  twin towers across the esplanade and one across a boulevard, and three
+  coloured sculptures on the esplanade.
+
+The route: off the runway and round to the right, down the east side of the
+field and into the first boulevard. Eight corners through the grid,
+under the first skybridge, then onto the esplanade — a slalom past the
+sculptures, under the second bridge, through the Arche, and the runway is
+straight ahead of you. 32 gates, all but one of the 25 in the city below the
+surrounding rooftops.
+
+At a corner the gate goes where a turn of radius 100 would put you — about 41
+inside the corner of the two centre lines — and the straights are filled so no
+gate is more than 280 from the next. Gates are deliberately kept out of the
+junctions the route crosses twice, or you fly through an old ring on the way
+past.
+
+Everything solid is a collider, trees included, in an 80-unit grid. The
+rings' straight legs clear every building by 26 or more.
 
 ### Gate detection
 
@@ -332,6 +383,13 @@ import `three`. The suite builds every level and asserts:
   its edge, rises monotonically and never leaves the unit circle; the arrows
   only ever produce key-like −1/0/+1, with real diagonals, and register in
   every direction at 90% travel.
+- **The city** — the city gates are below the surrounding rooftops, every leg
+  between them clears every building by at least 12, the last gate fits
+  inside the Arche's opening, and each skybridge has a gate under it that the
+  ring does not touch. Then a line-following pilot flies the street run under
+  the real flight model, at 100 and at 120 kt, and has to clear every gate
+  without touching anything. It follows a Catmull-Rom racing line through the
+  gates and steers bank-to-turn: roll the lift onto the line, then pull.
 - **Line of sight** — on every mission the first gate is within 35° of the
   runway centreline, no gate turns more than 70° to reach the next, no leg is
   longer than the fog, and the last gate is far enough out and low enough to
@@ -353,8 +411,8 @@ smoke signal, not a specification.
 - [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
 - [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
 - [ ] Ghost replay of your best run
-- [ ] The autopilot stalls out around gate 9 of 18 on Green Valley and gate 3
-      of 30 on City Towers, at the same gates whatever the speed — so it is not
+- [ ] The autopilot stalls out around gate 9 of 18 on Green Valley,
+      at the same gates whatever the speed — so it is not
       a turn-radius limit but something structural about chained short legs in
       the crosswind arc. Cross-track control along the leg, instead of pure
       pursuit to the gate, is the next thing to try
@@ -369,5 +427,15 @@ smoke signal, not a specification.
 - [ ] Canyon walls could use strata banding rather than one flat rock colour
 - [ ] The canyon's repositioning sweep is long; a second, lower gorge running
       back towards the field would be a better way home than flying round
+- [ ] City Towers: an Eiffel Tower. It wants its own lattice mesh and a
+      collider that lets you fly under the arches between the legs — a gate
+      there would be the obvious finale before the Arche
+- [ ] City Towers at dusk: the window shader already has lit windows; at night
+      they would carry the whole look
+- [ ] The city's line-following test pilot completes the street run at 120 kt;
+      it could fly the attract-mode demo there instead of the autopilot, which
+      loses the route after the first gate and never reaches the city
+- [ ] Cars pass through each other at junctions; traffic lights, or at least a
+      pause at the crossing, would fix it
 - [ ] Engine audio is a bit coarse — the drone could use a second detuned
       oscillator and a proper doppler on the gate chime
