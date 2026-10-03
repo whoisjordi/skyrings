@@ -28,6 +28,11 @@ const SOFT_BOUND = WORLD_SIZE * 0.46;
 const HARD_BOUND = WORLD_SIZE * 0.62;
 const STOPPED = 4;          // speed below which a rollout counts as stopped
 
+// Shown on the title screen. It lives in the script rather than the page so
+// it reports the code actually running: a stale cached module shows its own,
+// older number even when index.html is fresh.
+const VERSION = 'v1.1';
+
 const $ = (id) => document.getElementById(id);
 
 // ---------------------------------------------------------------------------
@@ -522,6 +527,7 @@ if (new URLSearchParams(location.search).has('debug')) {
   };
 }
 
+$('version').textContent = VERSION;
 initInput();
 loadLevel(0);
 last = performance.now();

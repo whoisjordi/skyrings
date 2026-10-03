@@ -83,6 +83,9 @@
   .screen{position:fixed;inset:0;display:grid;place-items:center;
     background:rgba(4,8,12,.72);backdrop-filter:blur(9px);z-index:10;padding:24px}
   .screen.hidden{display:none}
+  /* Small enough to ignore, there to check which build the browser is running. */
+  .version{position:fixed;left:0;right:0;bottom:calc(10px + env(safe-area-inset-bottom));
+    text-align:center;font-size:11px;letter-spacing:.08em;color:rgba(255,255,255,.55);pointer-events:none}
   .card{width:min(660px,100%);max-height:100%;overflow:auto;background:var(--panel);
     border:1px solid var(--edge);border-radius:16px;padding:30px 32px;
     box-shadow:0 26px 80px rgba(0,0,0,.6)}
@@ -284,6 +287,7 @@
 </div>
 
 <div class="screen" id="screen-title">
+  <div class="version" id="version"></div>
   <div class="card">
     <h1>SKYRINGS</h1>
     <div class="tagline">Low-poly arcade flight</div>

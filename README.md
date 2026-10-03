@@ -111,6 +111,14 @@ planning and no terrain avoidance. What it does:
 **It does not yet complete a mission.** It flies about half of Green Valley
 cleanly, most gates dead centre, then loses one and goes around. See the TODO.
 
+## Version
+
+The title screen shows the version in small letters at the bottom (`v1.1`).
+It is set by `VERSION` in `src/main.js`, not in the page, so it reports the
+code the browser is actually running — if it shows an older number after a
+deploy, the browser is still on cached scripts and needs a hard refresh.
+Bump it with every release.
+
 ## Running it locally
 
 ES modules will not load from `file://`, so serve the folder over HTTP:
