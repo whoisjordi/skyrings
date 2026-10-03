@@ -302,7 +302,9 @@ export const LEVELS = [
       route: {
         departAt: 800, departAGL: 80,
         spacing: 380,
-        main: { from: 0.56, to: 0.96, agl: [[0.5, 90], [0.8, 110], [1, 150]] },
+        // High enough over the first gates for the valley dragon to coil
+        // beneath them.
+        main: { from: 0.56, to: 0.96, agl: [[0.5, 145], [0.7, 140], [0.8, 120], [1, 150]] },
         trib: { from: 0.95, to: 0.12, agl: [[0, 85], [0.8, 100], [1, 140]] },
         summitClearance: 10,
         // High over the lake, where the dragon is, then down onto final.
@@ -311,14 +313,28 @@ export const LEVELS = [
         maxTurn: 30,
       },
     },
-    // The drone show: ~1500 lights in the shape of a Chinese dragon, coiled
-    // round the gates that cross the lake. See docs/flock.md.
-    dragon: {
-      minClearance: 100,   // a gate's height over the water to be coiled round
-      planeRadius: 8,
-      shape: {},           // createDragon options; DRAGON_DEFAULTS otherwise
-      rules: {},           // createFlock rules; DEFAULT_RULES otherwise
-    },
+    // The drone shows: ~1500 lights each in the shape of a Chinese dragon.
+    // See docs/flock.md. `shape` takes createDragon options and `rules`
+    // createFlock rules; the defaults apply otherwise.
+    dragons: [
+      {
+        // Up the valley, coiled round rings 2-4: in sight from the runway.
+        gates: [1, 3],
+        seed: 0x1d,
+        planeRadius: 8,
+        shape: {
+          colors: {
+            scale: [0.06, 0.62, 0.36], scaleDark: [0.03, 0.38, 0.24],
+            belly: [0.85, 0.95, 0.7], mane: [0.2, 0.9, 0.75],
+          },
+        },
+      },
+      {
+        // Over the lake, round the gates that cross the water.
+        minClearance: 100,   // a gate's height over the water to be coiled round
+        planeRadius: 8,
+      },
+    ],
     city: null,
     palette: {
       sky: 0x050a18, fog: 0x0a1226, fogNear: 1800, fogFar: 6000,

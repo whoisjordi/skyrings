@@ -35,7 +35,7 @@ const STOPPED = 4;          // speed below which a rollout counts as stopped
 // Shown on the title screen. It lives in the script rather than the page so
 // it reports the code actually running: a stale cached module shows its own,
 // older number even when index.html is fresh.
-const VERSION = 'v1.3';
+const VERSION = 'v1.4';
 
 const $ = (id) => document.getElementById(id);
 
@@ -119,18 +119,15 @@ function loadLevel(index) {
   root.add(terrain.group, airport.group, rings.group, createClouds(cfg), applySky(scene, cfg.palette), plane.object);
   if (props) root.add(props.group);
 
-  // The night mission's sky, and its dragon of drones over the lake.
+  // The night mission's sky, and its dragons of drones.
   const sky = createNightSky(cfg);
   if (sky) root.add(sky);
-  let drones = null, droneView = null;
-  if (cfg.dragon) {
-    drones = createDrones(cfg, gates, terrain.heightAt, { phone: !!touch });
-    droneView = createFlockView(drones.flock);
-    root.add(droneView.object);
-  }
+  const drones = (cfg.dragons ?? []).map((spec) => createDrones(cfg, spec, gates, terrain.heightAt, { phone: !!touch }));
+  const droneViews = drones.map((d) => createFlockView(d.flock));
+  for (const v of droneViews) root.add(v.object);
   scene.add(root);
 
-  level = { cfg, root, terrain, airport, canyon, gates, rings, city, props, plane, sky, drones, droneView };
+  level = { cfg, root, terrain, airport, canyon, gates, rings, city, props, plane, sky, drones, droneViews };
   // The racing-line pilot lands every mission but the canyon, where its
   // line cuts the bends too fine; the older path-follower flies that one.
   demo = canyon ? createAutopilot(level) : createLinePilot(level);
@@ -192,7 +189,7 @@ function resetRun() {
   level.root.add(level.rings.group);
 
   run = { time: 0, outcome: null, reason: '', landed: false, bellied: false, warned: false };
-  if (level.drones) level.drones.resetThreat();
+  for (const d of level.drones) d.resetThreat();
   if (touch) touch.resetThrottle();
   chase.snap();
   HUD.clearBanner();
@@ -384,12 +381,12 @@ function frame(now) {
 
   // The drones fly on behind the menus too, and dodge the demo pilot. A
   // crashed aeroplane is no longer something to get out of the way of.
-  if (level && level.drones && state !== 'paused') {
+  if (level && state !== 'paused') {
     const p = level.plane;
     const live = (state === 'flying' || state === 'menu') && !p.dead;
-    level.drones.update(dt, live ? p.position : null, live ? p.velocity : null);
+    for (const d of level.drones) d.update(dt, live ? p.position : null, live ? p.velocity : null);
   }
-  if (level && level.droneView) level.droneView.update(camera, renderer.domElement.height);
+  if (level) for (const v of level.droneViews) v.update(camera, renderer.domElement.height);
   if (level && level.sky) level.sky.position.copy(camera.position);
 
   Input.endFrame();
@@ -577,16 +574,17 @@ if (new URLSearchParams(location.search).has('tune')) {
     + 'font:11px monospace;padding:6px 8px;border-radius:6px;max-height:90vh;overflow:auto';
   document.body.appendChild(panel);
   const build = () => {
-    panel.innerHTML = '<b>flock</b> (level with drones)';
-    const f = level && level.drones && level.drones.flock;
-    if (!f) return;
+    panel.innerHTML = '<b>flock</b> (all dragons)';
+    const flocks = level ? level.drones.map((d) => d.flock) : [];
+    if (!flocks.length) return;
+    const f = flocks[0];
     for (const [key, lo, hi, st] of TUNABLE) {
       const row = document.createElement('label');
       row.style.cssText = 'display:grid;grid-template-columns:96px 110px 40px;gap:4px;align-items:center';
       const out = document.createElement('span');
       const inp = Object.assign(document.createElement('input'), { type: 'range', min: lo, max: hi, step: st, value: f.rules[key] });
       out.textContent = f.rules[key];
-      inp.addEventListener('input', () => { f.setRules({ [key]: +inp.value }); out.textContent = inp.value; });
+      inp.addEventListener('input', () => { for (const fl of flocks) fl.setRules({ [key]: +inp.value }); out.textContent = inp.value; });
       row.append(key, inp, out);
       panel.appendChild(row);
     }

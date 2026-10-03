@@ -1,6 +1,6 @@
-// The drone show over the lake on the night mission: the flock module, a
-// dragon formation coiled round the gates that cross the water, and the
-// aeroplane as the threat they all dodge.
+// The drone shows on the night mission: the flock module, a dragon formation
+// coiled round a run of gates (one off the runway, one over the lake), and
+// the aeroplane as the threat they all dodge. One of these per dragon.
 //
 // Game-side glue with no three.js, so the harness can fly through it too.
 // Rendering is in flockview.js.
@@ -26,38 +26,46 @@ export function cacheHeights(heightAt, x0, z0, x1, z1, cell = 20) {
   };
 }
 
-/** The gates the dragon coils round: those over the lake, in order. */
-export function dragonAxis(cfg, gates) {
+/**
+ * The gates a dragon coils round, in order: a fixed run of gates if the spec
+ * names one ({ gates: [first, last] }), otherwise those over the lake.
+ */
+export function dragonAxis(cfg, spec, gates) {
+  if (spec.gates) {
+    const [a, b] = spec.gates;
+    return Array.from({ length: b - a + 1 }, (_, k) => a + k);
+  }
   const L = cfg.alps.lake;
-  const k = cfg.dragon.lakeFraction ?? 0.92;
+  const k = spec.lakeFraction ?? 0.92;
   const over = [];
   // Never the final gate, and only gates high enough over the water for
   // the coil to pass beneath them.
   gates.forEach((g, i) => {
     if (i === gates.length - 1) return;
     const q = Math.hypot((g.position.x - L.x) / L.rx, (g.position.z - L.z) / L.rz);
-    if (q < k && g.position.y > cfg.dragon.minClearance) over.push(i);
+    if (q < k && g.position.y > spec.minClearance) over.push(i);
   });
   return over;
 }
 
 /**
- * @param {object} cfg       level config with a `dragon` block
+ * @param {object} cfg       level config
+ * @param {object} spec      one entry of its `dragons` list
  * @param {Array} gates      the route
  * @param {Function} heightAt
  * @param {object} [o]       { phone: true } for fewer drones
  */
-export function createDrones(cfg, gates, heightAt, o = {}) {
-  const spec = cfg.dragon;
-  const idx = dragonAxis(cfg, gates);
+export function createDrones(cfg, spec, gates, heightAt, o = {}) {
+  const idx = dragonAxis(cfg, spec, gates);
+  const salt = spec.seed ?? 0;
   const axis = idx.map((i) => [gates[i].position.x, gates[i].position.y, gates[i].position.z]);
   const dragon = createDragon({
     ...spec.shape,
     axis,
-    seed: cfg.seed ^ 0xd2a6,
+    seed: cfg.seed ^ 0xd2a6 ^ salt,
     spacing: (spec.shape?.spacing ?? 5.2) * (o.phone ? 1.6 : 1),
   });
-  const flock = createFlock({ count: dragon.count, seed: cfg.seed ^ 0xf10c, rules: spec.rules ?? {} });
+  const flock = createFlock({ count: dragon.count, seed: cfg.seed ^ 0xf10c ^ salt, rules: spec.rules ?? {} });
   flock.setFormation(dragon);
   flock.settle();
 

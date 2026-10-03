@@ -1156,19 +1156,24 @@ function checkFlock() {
 // the water, the gates it coils round are the ones over the lake, and the demo
 // pilot flies the whole mission through it with no drone ever touched.
 function checkDragon(cfg, w) {
-  const drones = createDrones(cfg, w.gates, w.terrain.heightAt);
-  const { dragon, flock, axisGates } = drones;
-  ok(axisGates.length >= 3, `the dragon coils round only ${axisGates.length} gates`);
-  let low = Infinity;
-  for (let a = 0; a < dragon.loopLength; a += 4) {
-    const p = dragon.pathPoint(a);
-    low = Math.min(low, p[1] - Math.max(0, w.terrain.heightAt(p[0], p[2])));
+  const all = cfg.dragons.map((spec) => createDrones(cfg, spec, w.gates, w.terrain.heightAt));
+  const out = all.map(({ dragon, flock, axisGates }) => {
+    ok(axisGates.length >= 3, `a dragon coils round only ${axisGates.length} gates`);
+    let low = Infinity;
+    for (let a = 0; a < dragon.loopLength; a += 4) {
+      const p = dragon.pathPoint(a);
+      low = Math.min(low, p[1] - Math.max(0, w.terrain.heightAt(p[0], p[2])));
+    }
+    ok(low > 40, `the dragon round gates ${axisGates[0]}-${axisGates.at(-1)} comes within ${low.toFixed(0)} of the ground`);
+    return { count: flock.count, gates: axisGates, low, turns: dragon.turns, flock };
+  });
+  const d = flyDemo(w, { update: (...a) => all.forEach((x) => x.update(...a)) });
+  ok(d.why === 'landed', `demo pilot through the dragons: ${d.gates}/${d.total} gates, ${d.why}`);
+  for (const o of out) {
+    ok(o.flock.stats.hits === 0, `the demo pilot touched ${o.flock.stats.hits} drones of the dragon round gates ${o.gates[0]}-${o.gates.at(-1)}`);
+    o.nearest = o.flock.stats.nearest;
   }
-  ok(low > 40, `the dragon's path comes within ${low.toFixed(0)} of the ground`);
-  const d = flyDemo(w, drones);
-  ok(d.why === 'landed', `demo pilot through the dragon: ${d.gates}/${d.total} gates, ${d.why}`);
-  ok(flock.stats.hits === 0, `the demo pilot touched ${flock.stats.hits} drones`);
-  return { count: flock.count, gates: axisGates, low, nearest: flock.stats.nearest, demo: d, turns: dragon.turns, loop: dragon.loopLength };
+  return { dragons: out, demo: d };
 }
 
 // --- run -------------------------------------------------------------------
@@ -1212,10 +1217,13 @@ for (const cfg of LEVELS) {
     console.log(`  line    ${a.slow.speed}kt ${a.slow.gates}/${a.total} in ${a.slow.t.toFixed(0)}s off-line ${a.slow.worst.toFixed(0)}`
       + `  |  ${a.fast.speed}kt ${a.fast.gates} in ${a.fast.t.toFixed(0)}s off-line ${a.fast.worst.toFixed(0)}`);
   }
-  if (cfg.dragon) {
+  if (cfg.dragons) {
     const g = checkDragon(cfg, build(cfg));
-    console.log(`  dragon  ${g.count} drones round gates ${g.gates[0]}-${g.gates[g.gates.length - 1]}, ${g.turns} turns, path ${g.low.toFixed(0)}+ above ground`
-      + `  demo ${g.demo.why} after ${g.demo.t.toFixed(0)}s, nearest drone ${g.nearest.toFixed(0)}`);
+    for (const o of g.dragons) {
+      console.log(`  dragon  ${o.count} drones round gates ${o.gates[0]}-${o.gates.at(-1)}, ${o.turns} turns, path ${o.low.toFixed(0)}+ above ground`
+        + `, nearest to the demo pilot ${o.nearest.toFixed(0)}`);
+    }
+    console.log(`          demo ${g.demo.why} after ${g.demo.t.toFixed(0)}s`);
   }
   if (cfg.city) {
     const c = checkCity(cfg, build(cfg));

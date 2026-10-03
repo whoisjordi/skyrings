@@ -111,7 +111,7 @@ a mission.
 
 ## Version
 
-The title screen shows the version in small letters at the bottom (`v1.3`).
+The title screen shows the version in small letters at the bottom (`v1.4`).
 It is set by `VERSION` in `src/main.js`, not in the page, so it reports the
 code the browser is actually running — if it shows an older number after a
 deploy, the browser is still on cached scripts and needs a hard refresh.
@@ -335,9 +335,12 @@ and round onto final. 22 gates, 16 of them over a valley floor.
 
 Level 4 is a clear night in the mountains: Alpine Valley's layout mirrored and
 cut to about half the height (peaks to ~860 instead of ~1,700), lit by a low
-moon over the lake, with 1,600 stars. Over the lake about **1,500 drones** fly
-in the shape of a **Chinese dragon** that coils round the gates crossing the
-water — and gets out of your way when you fly into it. Phones get about 640.
+moon over the lake, with 1,600 stars. Two **Chinese dragons** of about
+**1,500 drones** each coil round the route and get out of your way when you
+fly into them: a jade one round rings 2–4, in sight from the runway, and a
+red-gold one round the gates crossing the lake. Phones get about 640 each.
+The first rings are flown higher (about 140 over the valley floor) so the
+valley dragon has room to coil beneath them.
 The full design is in [`docs/flock.md`](docs/flock.md).
 
 **The flock engine** (`src/flock/`) is written to be lifted into another game
@@ -499,9 +502,9 @@ import `three`. The suite builds every level and asserts:
   a startle takes over 2.5× as long to cross a line of 120 agents; a free
   flock with a predator and a player-steered bird stays near home, finite, and
   leaves the player where its owner put it; and a tick fits its CPU budget.
-- **The dragon** — on Dragon Night it coils round at least three lake gates,
+- **The dragons** — on Dragon Night each coils round at least three gates,
   its path keeps 40+ above ground and water, and the demo pilot flies the
-  whole mission through it, landing included, without touching a drone.
+  whole mission through both, landing included, without touching a drone.
 - **The demo** — on every level but the canyon, the racing-line pilot takes off,
   flies every gate and lands, under the same rules as a player.
 - **The city** — the city gates are below the surrounding rooftops, every leg
