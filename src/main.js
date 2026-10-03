@@ -10,10 +10,12 @@ import { LEVELS, formatTime } from './levels.js';
 import { createTerrain, WORLD_SIZE, airportYOf, setTerrainQuality } from './terrain.js';
 import { createAirport } from './airport.js';
 import { buildRoute, buildCanyonRoute, buildCityRoute, buildAlpineRoute, RingSet } from './rings.js';
-import { applySky, createClouds } from './scenery.js';
+import { applySky, createClouds, createNightSky } from './scenery.js';
 import { createCity } from './city.js';
 import { createAlpineShape, createAlpineProps } from './alps.js';
 import { createCanyon } from './canyon.js';
+import { createDrones } from './drones.js';
+import { createFlockView } from './flockview.js';
 import { Plane, TUNE } from './plane.js';
 import { ChaseCamera } from './camera.js';
 import { HUD } from './hud.js';
@@ -72,6 +74,7 @@ let levelIndex = 0;
 let state = 'menu';        // menu | flying | paused | result
 let run = null;            // per-attempt state
 let demo = null;           // autopilot flying behind the menus
+let onLevelLoaded = null;  // debug hook
 
 function disposeLevel() {
   if (!level) return;
@@ -115,14 +118,25 @@ function loadLevel(index) {
 
   root.add(terrain.group, airport.group, rings.group, createClouds(cfg), applySky(scene, cfg.palette), plane.object);
   if (props) root.add(props.group);
+
+  // The night mission's sky, and its dragon of drones over the lake.
+  const sky = createNightSky(cfg);
+  if (sky) root.add(sky);
+  let drones = null, droneView = null;
+  if (cfg.dragon) {
+    drones = createDrones(cfg, gates, terrain.heightAt, { phone: !!touch });
+    droneView = createFlockView(drones.flock);
+    root.add(droneView.object);
+  }
   scene.add(root);
 
-  level = { cfg, root, terrain, airport, canyon, gates, rings, city, props, plane };
+  level = { cfg, root, terrain, airport, canyon, gates, rings, city, props, plane, sky, drones, droneView };
   // The racing-line pilot lands every mission but the canyon, where its
   // line cuts the bends too fine; the older path-follower flies that one.
   demo = canyon ? createAutopilot(level) : createLinePilot(level);
   HUD.setLevel(cfg.name);
   resetRun();
+  if (onLevelLoaded) onLevelLoaded();
 }
 
 /** Puts the aeroplane back on the runway and lets the autopilot fly again. */
@@ -178,6 +192,7 @@ function resetRun() {
   level.root.add(level.rings.group);
 
   run = { time: 0, outcome: null, reason: '', landed: false, bellied: false, warned: false };
+  if (level.drones) level.drones.resetThreat();
   if (touch) touch.resetThrottle();
   chase.snap();
   HUD.clearBanner();
@@ -367,6 +382,16 @@ function frame(now) {
   // Traffic and flags keep moving behind the menus, and stop when you pause.
   if (level && level.props && state !== 'paused') level.props.update(dt);
 
+  // The drones fly on behind the menus too, and dodge the demo pilot. A
+  // crashed aeroplane is no longer something to get out of the way of.
+  if (level && level.drones && state !== 'paused') {
+    const p = level.plane;
+    const live = (state === 'flying' || state === 'menu') && !p.dead;
+    level.drones.update(dt, live ? p.position : null, live ? p.velocity : null);
+  }
+  if (level && level.droneView) level.droneView.update(camera, renderer.domElement.height);
+  if (level && level.sky) level.sky.position.copy(camera.position);
+
   Input.endFrame();
   renderer.render(scene, camera);
 }
@@ -536,6 +561,37 @@ if (new URLSearchParams(location.search).has('debug')) {
       camera.updateMatrixWorld();
     },
   };
+}
+
+// ?debug&tune: live sliders for the drone show's flock rules.
+if (new URLSearchParams(location.search).has('tune')) {
+  const TUNABLE = [
+    ['reactionDelay', 0, 0.5, 0.01], ['reactionJitter', 0, 0.2, 0.01], ['startleGain', 0, 1, 0.05],
+    ['lookAhead', 0.3, 3, 0.1], ['threatRadius', 10, 120, 1], ['clearance', 5, 80, 1],
+    ['dodgeMargin', 1, 4, 0.1], ['panicAccel', 20, 300, 5], ['maxAccel', 5, 120, 1],
+    ['maxSpeed', 20, 150, 1], ['alignGain', 0, 5, 0.1], ['cohesionGain', 0, 2, 0.05],
+    ['slotGain', 0.2, 5, 0.1],
+  ];
+  const panel = document.createElement('div');
+  panel.style.cssText = 'position:fixed;right:8px;top:8px;z-index:50;background:#000a;color:#ddd;'
+    + 'font:11px monospace;padding:6px 8px;border-radius:6px;max-height:90vh;overflow:auto';
+  document.body.appendChild(panel);
+  const build = () => {
+    panel.innerHTML = '<b>flock</b> (level with drones)';
+    const f = level && level.drones && level.drones.flock;
+    if (!f) return;
+    for (const [key, lo, hi, st] of TUNABLE) {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:grid;grid-template-columns:96px 110px 40px;gap:4px;align-items:center';
+      const out = document.createElement('span');
+      const inp = Object.assign(document.createElement('input'), { type: 'range', min: lo, max: hi, step: st, value: f.rules[key] });
+      out.textContent = f.rules[key];
+      inp.addEventListener('input', () => { f.setRules({ [key]: +inp.value }); out.textContent = inp.value; });
+      row.append(key, inp, out);
+      panel.appendChild(row);
+    }
+  };
+  onLevelLoaded = build;
 }
 
 $('version').textContent = VERSION;

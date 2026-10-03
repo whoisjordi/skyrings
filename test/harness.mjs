@@ -16,6 +16,9 @@ import { createCity } from '../src/city.js';
 import { createAlpineShape, createAlpineProps } from '../src/alps.js';
 import { Plane, TUNE, NITRO } from '../src/plane.js';
 import { createLinePilot, steerTowards } from '../src/linepilot.js';
+import { createFlock, ROLE } from '../src/flock/flock.js';
+import { createDragon } from '../src/flock/dragon.js';
+import { createDrones } from '../src/drones.js';
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -656,7 +659,7 @@ function checkAlps(cfg, w) {
 // Behind the menus the racing-line pilot flies the whole mission: takeoff,
 // every gate, and a landing that the runway accepts. Checked on every level
 // it flies, since an attract mode that crashes is worse than none.
-function flyDemo(w) {
+function flyDemo(w, drones = null) {
   const { terrain, airport, gates, props } = w;
   const plane = new Plane(LEVELS[0].palette);
   const rings = new RingSet({ route: { ringRadius: w.rings.radius } }, gates);
@@ -667,6 +670,7 @@ function flyDemo(w) {
   while (t < 420) {
     const ev = plane.update(STEP, pilot.update(STEP, plane, rings), world);
     rings.update(STEP, plane.position);
+    if (drones) drones.update(STEP, plane.position, plane.velocity);
     if (ev && (ev.type === 'crash' || ev.type === 'belly')) { why = ev.reason ?? ev.type; break; }
     if (ev && ev.type === 'touchdown' && rings.done) landed = true;
     if (!plane.onGround && props && props.collides(plane.position.x, plane.position.y, plane.position.z)) { why = 'hit an obstacle'; break; }
@@ -1025,11 +1029,162 @@ function checkPad() {
   }
 }
 
+// --- the flock ---------------------------------------------------------------
+// The flock module on its own, against a test dragon coiled round a straight-
+// ish axis: it holds the shape, keeps its spacing, dodges a threat flown
+// through it at cruise and at nitro speed without a single touch, heals
+// afterwards, is deterministic, propagates a startle at a speed set by the
+// reaction delay, and fits its CPU budget.
+function checkFlock() {
+  const axis = [[0, 200, 0], [400, 200, 100], [800, 200, 0], [1200, 220, -100]];
+  const make = (rules = {}) => {
+    const d = createDragon({ axis });
+    const f = createFlock({ count: d.count, rules });
+    f.setFormation(d);
+    f.settle();
+    return { d, f };
+  };
+  const slotErr = (f, d) => {
+    let e = 0;
+    for (let i = 0; i < f.count * 3; i += 3) e += Math.hypot(f.pos[i] - d.pos[i], f.pos[i + 1] - d.pos[i + 1], f.pos[i + 2] - d.pos[i + 2]);
+    return e / f.count;
+  };
+
+  // Formation and spacing.
+  const { d, f } = make();
+  for (let k = 0; k < 150; k++) f.tick({});
+  const err = slotErr(f, d);
+  ok(err < 0.6, `the flock holds the dragon to ${err.toFixed(2)} on average`);
+  let minD = Infinity;
+  for (let i = 0; i < f.count; i++) {
+    for (let j = i + 1; j < f.count; j++) {
+      const dd = Math.hypot(f.pos[i * 3] - f.pos[j * 3], f.pos[i * 3 + 1] - f.pos[j * 3 + 1], f.pos[i * 3 + 2] - f.pos[j * 3 + 2]);
+      if (dd < minD) minD = dd;
+    }
+  }
+  ok(minD > 1.2, `two drones ${minD.toFixed(2)} apart`);
+
+  // Pierce the body at four places and two speeds.
+  const pierce = [];
+  for (const [target, speed] of [[30, 127], [200, 127], [450, 127], [300, 300]]) {
+    const { d: dd, f: ff } = make();
+    for (let k = 0; k < 60; k++) ff.tick({});
+    const s0 = ff.time * 26 + 1.5 * 26 - target;
+    const aim = dd.pathPoint(s0), aim2 = dd.pathPoint(s0 + 5);
+    const tl = Math.hypot(aim2[0] - aim[0], aim2[2] - aim[2]) || 1;
+    let dir = [-(aim2[2] - aim[2]) / tl, 0.3, (aim2[0] - aim[0]) / tl];
+    const dl = Math.hypot(...dir); dir = dir.map((x) => x / dl);
+    let p = aim.map((a, i) => a - dir[i] * speed * 1.5);
+    const v = dir.map((x) => x * speed);
+    for (let k = 0; k < 90; k++) {
+      // The test aeroplane moves in four sub-steps per tick, so the nearest
+      // approach is not missed between ticks.
+      for (let q = 0; q < 4; q++) {
+        p = p.map((a, i) => a + v[i] / 120);
+        if (q === 3) ff.tick({ threats: [{ x: p[0], y: p[1], z: p[2], vx: v[0], vy: v[1], vz: v[2], radius: 8 }] });
+      }
+    }
+    let heal = 0;
+    while (slotErr(ff, dd) > 0.6 && heal < 15) { ff.tick({}); heal += 1 / 30; }
+    pierce.push({ target, speed, nearest: ff.stats.nearest, hits: ff.stats.hits, heal });
+    ok(ff.stats.hits === 0 && ff.stats.nearest > 12,
+      `pierced at s=${target}, ${speed}kt: ${ff.stats.hits} drones hit, nearest ${ff.stats.nearest.toFixed(1)}`);
+    ok(heal < 8, `the dragon took ${heal.toFixed(1)}s to heal after the pass at s=${target}`);
+  }
+
+  // Determinism: same seed, same inputs, same flock.
+  const a = make(), b = make();
+  for (let k = 0; k < 60; k++) {
+    const t = { threats: [{ x: 300, y: 200, z: 50 + k, vx: 0, vy: 0, vz: 127, radius: 8 }] };
+    a.f.tick(t); b.f.tick(t);
+  }
+  let same = true;
+  for (let i = 0; i < a.f.pos.length; i++) if (a.f.pos[i] !== b.f.pos[i]) { same = false; break; }
+  ok(same, 'the flock is not deterministic');
+
+  // Startle wave: a line of agents at rest, the first kept in panic. The
+  // front should reach the far end later the longer the reaction delay.
+  const front = (delay) => {
+    const n = 120;
+    const fl = createFlock({ count: n, rules: { reactionDelay: delay, reactionJitter: 0, startleGain: 0.98, panicDecay: 0.2, cohesionGain: 0, alignGain: 0 } });
+    for (let i = 0; i < n; i++) { fl.pos.set([i * 4, 100, 0], i * 3); fl.vel.set([0, 0, 0], i * 3); }
+    fl.prevPos.set(fl.pos);
+    for (let k = 0; k < 600; k++) {
+      fl.panic[0] = 1;
+      fl.tick({});
+      if (fl.panic[n - 1] > 0.3) return k / 30;
+    }
+    return Infinity;
+  };
+  const fast = front(0.034), slow = front(0.2);
+  ok(slow > fast * 2.5 && isFinite(slow), `startle front: ${fast.toFixed(2)}s at 34ms vs ${slow.toFixed(2)}s at 200ms`);
+
+  // Free flight, as the bird game will use it: no formation, a home to stay
+  // near, one predator, and one agent steered from outside (the player).
+  const birds = createFlock({ count: 300, seed: 5, center: [0, 300, 0], spread: 80,
+    rules: { minSpeed: 14, maxSpeed: 30, home: { x: 0, y: 300, z: 0, radius: 150 }, wander: 20, cohesionGain: 0.6 } });
+  birds.setRole(0, ROLE.PLAYER);
+  birds.setRole(1, ROLE.PREDATOR);
+  let finite = true, far = 0;
+  for (let k = 0; k < 600; k++) {
+    birds.pos.set([Math.cos(k / 60) * 100, 300, Math.sin(k / 60) * 100], 0);   // the player flies a circle
+    birds.tick({});
+    for (let i = 2; i < birds.count; i++) {
+      const x = birds.pos[i * 3], y = birds.pos[i * 3 + 1], z = birds.pos[i * 3 + 2];
+      if (!Number.isFinite(x + y + z)) finite = false;
+      far = Math.max(far, Math.hypot(x, y - 300, z));
+    }
+  }
+  const playerAt = Math.hypot(birds.pos[0] - Math.cos(599 / 60) * 100, birds.pos[2] - Math.sin(599 / 60) * 100);
+  ok(finite, 'a free flock went to NaN');
+  ok(far < 450, `a free bird strayed ${far.toFixed(0)} from home`);
+  ok(playerAt < 1e-3, 'the flock moved the player-steered agent');
+
+  // CPU: the mean tick with a threat in the middle of the dragon.
+  const bench = make();
+  for (let k = 0; k < 30; k++) bench.f.tick({});
+  const t0 = performance.now();
+  for (let k = 0; k < 300; k++) bench.f.tick({ threats: [{ x: 400, y: 200, z: 100, vx: 127, vy: 0, vz: 0, radius: 8 }] });
+  const ms = (performance.now() - t0) / 300;
+  ok(ms < 4, `a flock tick takes ${ms.toFixed(2)}ms (budget 1.5, asserted with slack)`);
+
+  return { count: f.count, err, minD, pierce, fast, slow, ms, far, parts: d.parts() };
+}
+
+// --- the dragon over the lake ---------------------------------------------------
+// The night mission's show: the dragon's path keeps clear of the ground and
+// the water, the gates it coils round are the ones over the lake, and the demo
+// pilot flies the whole mission through it with no drone ever touched.
+function checkDragon(cfg, w) {
+  const drones = createDrones(cfg, w.gates, w.terrain.heightAt);
+  const { dragon, flock, axisGates } = drones;
+  ok(axisGates.length >= 3, `the dragon coils round only ${axisGates.length} gates`);
+  let low = Infinity;
+  for (let a = 0; a < dragon.loopLength; a += 4) {
+    const p = dragon.pathPoint(a);
+    low = Math.min(low, p[1] - Math.max(0, w.terrain.heightAt(p[0], p[2])));
+  }
+  ok(low > 40, `the dragon's path comes within ${low.toFixed(0)} of the ground`);
+  const d = flyDemo(w, drones);
+  ok(d.why === 'landed', `demo pilot through the dragon: ${d.gates}/${d.total} gates, ${d.why}`);
+  ok(flock.stats.hits === 0, `the demo pilot touched ${flock.stats.hits} drones`);
+  return { count: flock.count, gates: axisGates, low, nearest: flock.stats.nearest, demo: d, turns: dragon.turns, loop: dragon.loopLength };
+}
+
 // --- run -------------------------------------------------------------------
 console.log('');
 console.log('\x1b[1mPhone stick\x1b[0m');
 checkPad();
 console.log('  stick and arrow-pad mapping checked\n');
+
+console.log('\x1b[1mFlock\x1b[0m');
+{
+  const fl = checkFlock();
+  console.log(`  dragon  ${fl.count} drones  slot error ${fl.err.toFixed(2)}  closest pair ${fl.minD.toFixed(2)}`);
+  console.log(`  pierce  ${fl.pierce.map((p) => `s=${p.target}@${p.speed}: nearest ${p.nearest.toFixed(0)}, heal ${p.heal.toFixed(1)}s`).join('  |  ')}`);
+  console.log(`  startle front ${fl.fast.toFixed(2)}s (34ms delay) vs ${fl.slow.toFixed(2)}s (200ms)  |  tick ${fl.ms.toFixed(2)}ms`);
+  console.log(`  free    300 birds, a predator and a player: farthest from home ${fl.far.toFixed(0)}\n`);
+}
 
 for (const cfg of LEVELS) {
   console.log(`\x1b[1m${cfg.name}\x1b[0m`);
@@ -1056,6 +1211,11 @@ for (const cfg of LEVELS) {
       + `  ${a.stats.trees} trees, ${a.stats.houses} chalets`);
     console.log(`  line    ${a.slow.speed}kt ${a.slow.gates}/${a.total} in ${a.slow.t.toFixed(0)}s off-line ${a.slow.worst.toFixed(0)}`
       + `  |  ${a.fast.speed}kt ${a.fast.gates} in ${a.fast.t.toFixed(0)}s off-line ${a.fast.worst.toFixed(0)}`);
+  }
+  if (cfg.dragon) {
+    const g = checkDragon(cfg, build(cfg));
+    console.log(`  dragon  ${g.count} drones round gates ${g.gates[0]}-${g.gates[g.gates.length - 1]}, ${g.turns} turns, path ${g.low.toFixed(0)}+ above ground`
+      + `  demo ${g.demo.why} after ${g.demo.t.toFixed(0)}s, nearest drone ${g.nearest.toFixed(0)}`);
   }
   if (cfg.city) {
     const c = checkCity(cfg, build(cfg));

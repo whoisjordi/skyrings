@@ -1,6 +1,7 @@
 # Flock and the Night Dragon — design
 
-Status: **draft for review**, nothing built yet.
+Status: **built** on 2026-10-03 (branch `night-dragon`). The section "As
+built" at the end lists where the build departs from this design and why.
 
 Level 4 becomes a clear night over low mountains. A flock of about 1500 lit
 drones coils around part of the gate route in the shape of a Chinese dragon.
@@ -270,3 +271,40 @@ while flying.
 4. Level 4 terrain, sky, moon and stars, the helix path from the gates, and
    the rename
 5. Fly-through tests with the line pilot, phone count, screenshots, README
+
+## As built — where it differs from the draft
+
+- **Units.** The game's unit is about one knot of the HUD: the aeroplane
+  cruises at ~127 units/s, not 65. Speeds and accelerations are scaled to that
+  (`maxSpeed` 65, `maxAccel` 45, `panicAccel` 140, dragon head 26 units/s).
+- **The coil** goes out *and back* along the lake gates (gates 16–20 of 22),
+  not out and then home high over the ridges. The draft's version would have
+  wrapped only one stretch at a time; out-and-back keeps the dragon round the
+  route whatever the timing. The coil radius is 60 ± 8, not 110, so its inside
+  hugs the 42-unit rings and anyone flying the gates pushes into it.
+- **The dodge** is a velocity target, not a push. The first build pushed every
+  drone within reach of the predicted path at a fixed acceleration: no drone
+  was hit, but a third of the dragon was flung 100+ units and took 20 s to
+  come back. Now each drone picks the sideways speed that gets it
+  `clearance` (26) off the path by the time the threat arrives, times a
+  margin, and steers to that. Outside the tunnel there is only a small flinch.
+  Healing is 3.5–5.5 s.
+- **Cohesion with delay** compares the neighbours' delayed positions with the
+  agent's own position *at the same moment*. Against its present position,
+  everything delayed sits behind it and a moving flock drags itself backwards.
+- **The formation** feeds the slot's velocity *and acceleration* forward and
+  takes the error against the start of the tick. The slot pull's closing speed
+  is limited by what the agent could brake from, so a drone flung far comes
+  back fast without overshooting. Calm error went from 5 units to ~0.2.
+- **Threat broadphase** is a box test per agent per threat, not a range of
+  grid cells: 1,500 comparisons is cheaper than walking the cells.
+- **Players** are moved by their owner (it writes their `pos`/`vel` before the
+  tick) rather than through a `steer` callback.
+- **Overlapping slots** are dropped at build time, features first: an eye that
+  clashes with the skull keeps its place.
+- **Ground** comes from a cached height grid over the lake area
+  (`cacheHeights` in `src/drones.js`); the alpine height function is too slow
+  to call for every drone.
+- **Measured**: 1,486 drones (640 on phones), ~1.3 ms per 30 Hz tick, calm slot
+  error 0.17, tunnel 34 from the aeroplane's centre, startle front 2.7 s across
+  480 units at 34 ms delay vs 9.3 s at 200 ms.

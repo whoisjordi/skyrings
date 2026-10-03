@@ -2,7 +2,7 @@
 
 A small low-poly arcade flight game that runs in the browser. Take off from the
 runway, fly the gates in order, come back and land. Four missions — Alpine
-Valley, Canyon Run, City Towers and Night Storm — your best time saved for each.
+Valley, Canyon Run, City Towers and Dragon Night — your best time saved for each.
 
 **Play:** https://whoisjordi.github.io/skyrings/
 
@@ -87,7 +87,7 @@ loaded mission behind them, under the same physics and the same landing rules
 as a player. It is scored by nothing and recorded nowhere, and restarts on a
 crash, a completed landing, or a spell without progress.
 
-On Alpine Valley, City Towers and Night Storm that is the **racing-line pilot**
+On Alpine Valley, City Towers and Dragon Night that is the **racing-line pilot**
 (`src/linepilot.js`), and it flies the whole mission: takeoff, every gate, and a
 landing the runway accepts. The tests check exactly that on each of the three.
 
@@ -141,11 +141,14 @@ src/terrain.js  seeded Perlin terrain, airport apron, departure corridor
 src/airport.js  runway geometry, touchdown judging, approach info
 src/rings.js    route generation, terrain clearance, gate crossing detection
 src/canyon.js   the carved gorge: centreline, depth profile, distance queries
-src/scenery.js  sky, lighting, clouds
+src/scenery.js  sky, lighting, clouds, and the night sky: stars and moon
 src/city.js     City Towers: streets, buildings, shader windows, traffic, colliders
 src/autopilot.js path-following autopilot; flies the canyon's demo
 src/linepilot.js racing-line pilot; flies every other demo, takeoff to landing
 src/alps.js     Alpine Valley: mountains, valleys, rivers, lake, forests, summit flags
+src/flock/      the flock engine: bird rules + formations, no three.js (see below)
+src/drones.js   Dragon Night's drone show: dragon round the lake gates, plane as threat
+src/flockview.js draws a flock as glowing additive points, one draw call
 src/camera.js   chase and cockpit cameras
 src/hud.js      DOM HUD, off-screen target arrow
 src/audio.js    synthesised engine, chimes and crash noise (no audio files)
@@ -328,6 +331,60 @@ as the valley does; over the summit between the flags, with the bottom of the
 ring 10 above the snow; down the side valley along its river; out over the lake
 and round onto final. 22 gates, 16 of them over a valley floor.
 
+### Dragon Night and the flock
+
+Level 4 is a clear night in the mountains: Alpine Valley's layout mirrored and
+cut to about half the height (peaks to ~860 instead of ~1,700), lit by a low
+moon over the lake, with 1,600 stars. Over the lake about **1,500 drones** fly
+in the shape of a **Chinese dragon** that coils round the gates crossing the
+water — and gets out of your way when you fly into it. Phones get about 640.
+The full design is in [`docs/flock.md`](docs/flock.md).
+
+**The flock engine** (`src/flock/`) is written to be lifted into another game
+— a bird-flock game where you are one of the birds — so it has no three.js in
+it, only typed arrays, and runs headless. It has two layers:
+
+- **Pattern 1, the bird rules**, in priority order: dodge threats, keep off
+  the ground, separation, alignment, cohesion. Neighbours are **topological** —
+  the 7 nearest, whatever their distance, as starlings do — found through a
+  hashed spatial grid rebuilt every tick, with each agent's list refreshed
+  every third tick.
+- **Pattern 2, a formation**: a slot for each agent, which it is drawn
+  towards. Only an attractor: the rules spend from a **fixed acceleration
+  budget** in priority order (Reynolds' prioritised allocation), and the slot
+  gets what the bird rules leave. A panicking drone forgets its slot until it
+  calms down. The slot's velocity and acceleration are fed forward, so calm
+  drones sit within ~0.2 of their slots while the dragon swims.
+- **Reaction delay**: a ring buffer keeps the last ticks of every agent's
+  state, and each agent sees its neighbours as they were `reactionDelay ±
+  reactionJitter` ago (default 80 ± 30 ms). Separation and dodging read the
+  present; alignment, cohesion and startle read the past. A startle therefore
+  runs through the flock as a wave whose speed the delay sets.
+- **The dodge** predicts the aeroplane's path 1.5 s ahead as a short parabola
+  (so it follows a turn), and each drone near it picks the sideways speed that
+  gets it 26 units clear of the path by the time the aeroplane arrives, with a
+  margin. A tunnel opens around you; further out drones only flinch, and their
+  panic spreads to their neighbours.
+- **Roles** for the bird game: `PLAYER` agents are moved by their owner and
+  count as neighbours to the rest; `PREDATOR` agents chase the nearest bird and
+  are dodged like the aeroplane.
+
+**The dragon** (`src/flock/dragon.js`) is a formation. Its head swims a closed
+path that coils round the lake gates — radius 60 ± 8, so its inside hugs the
+rings — out to the far gate and back, so the dragon is always wrapped round
+that stretch of the route. The body follows the head's own path like a snake,
+with a slow up-and-down wave; its back faces out and its belly faces the
+gates. Slots are laid out as a tapering tube of staggered rings (red scales, a
+gold spine line, a pale belly) with spikes, a head with an open jaw, eyes and
+antler horns, an orange mane, long waving whiskers, four legs with gold claws,
+a tail tuft, and a pearl tumbling ahead of the mouth. Each drone twinkles at
+its own phase, and every 20 s a bright wave runs from head to tail.
+
+**Cost**: about 1.3 ms per 30 Hz tick for 1,500 drones (≈4 % of a core), with
+render interpolation in between. The ground under the drones comes from a
+cached height grid, since the real terrain function is far too slow to call
+for every drone. `?debug&tune` adds live sliders for the main rules.
+
 ### The city
 
 City Towers is flown *in* the streets, not over the roofs. Like the canyon, the
@@ -434,6 +491,17 @@ import `three`. The suite builds every level and asserts:
   top, there is a pole either side of it and nothing solid inside it. Then
   the line pilot flies the route from the departure gate at 100 and 115 kt and
   must take every gate without touching the ground or a tree.
+- **The flock** — on a test dragon: calm drones hold their slots to under 0.6
+  on average and never sit on top of each other; a threat flown through the
+  head, the middle and the tail at 127 kt, and through the body at 300, touches
+  no drone, gets no closer than 12, and the dragon heals within 8 s each time;
+  the same seed and inputs give the same flock; with a longer reaction delay
+  a startle takes over 2.5× as long to cross a line of 120 agents; a free
+  flock with a predator and a player-steered bird stays near home, finite, and
+  leaves the player where its owner put it; and a tick fits its CPU budget.
+- **The dragon** — on Dragon Night it coils round at least three lake gates,
+  its path keeps 40+ above ground and water, and the demo pilot flies the
+  whole mission through it, landing included, without touching a drone.
 - **The demo** — on every level but the canyon, the racing-line pilot takes off,
   flies every gate and lands, under the same rules as a player.
 - **The city** — the city gates are below the surrounding rooftops, every leg
@@ -483,6 +551,13 @@ smoke signal, not a specification.
       there would be the obvious finale before the Arche
 - [ ] City Towers at dusk: the window shader already has lit windows; at night
       they would carry the whole look
+- [ ] A bird-flock game on `src/flock/` (its own repo when it starts): you
+      are one of the birds (`ROLE.PLAYER`), with hawks (`ROLE.PREDATOR`)
+- [ ] Dragon Night: slot swapping, so a drone flung far trades places with
+      one nearer its slot and the dragon heals faster
+- [ ] Dragon Night: lit chalet windows and a moon glint on the lake
+- [ ] Dragon Night: the drones as a reflection in the lake (a second, dimmer
+      draw of the same points mirrored in the water plane)
 - [ ] Alpine Valley: waterfalls off the valley walls, and something moving —
       a cable car up to the summit, or birds circling below it
 - [ ] Alpine Valley: rivers are flat ribbons; a little white water where the
