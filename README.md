@@ -1,8 +1,8 @@
 # Skyrings
 
 A small low-poly arcade flight game that runs in the browser. Take off from the
-runway, fly the gates in order, come back and land. Four missions, your best
-time saved for each.
+runway, fly the gates in order, come back and land. Four missions — Alpine
+Valley, Canyon Run, City Towers and Night Storm — your best time saved for each.
 
 **Play:** https://whoisjordi.github.io/skyrings/
 
@@ -82,38 +82,36 @@ laptop with a mouse keeps the keyboard layout.
 
 ## The demo
 
-The title and mission screens are not a static backdrop: an autopilot is
-flying the loaded mission behind them, under the same physics and the same
-landing rules as a player. It is scored by nothing and recorded nowhere, and
-restarts on a crash, a completed landing, or 25 seconds without reaching a
-gate.
+The title and mission screens are not a static backdrop: a pilot is flying the
+loaded mission behind them, under the same physics and the same landing rules
+as a player. It is scored by nothing and recorded nowhere, and restarts on a
+crash, a completed landing, or a spell without progress.
 
-It leans on a guarantee the route generator already provides — that the
-straight line between consecutive gates clears the ground — so it does no path
-planning and no terrain avoidance. What it does:
+On Alpine Valley, City Towers and Night Storm that is the **racing-line pilot**
+(`src/linepilot.js`), and it flies the whole mission: takeoff, every gate, and a
+landing the runway accepts. The tests check exactly that on each of the three.
 
-- **Aims at a point on the current leg, a lookahead ahead, clamped at the next
-  gate.** The clamp is what makes it fly *through* rings rather than past them:
-  letting the lookahead spill onto the next leg cuts the corner by about 39
-  units, against rings of 34–46.
-- **Banks for the curvature the geometry needs**, `2·sin(bearing)/range`,
-  inverted through the model's own turn relation. A gain proportional to
-  bearing error looks reasonable and does not work: a 13° error asks for 24° of
-  bank, which turns too slowly to ever close it.
-- **Brakes for the corner.** Turn radius goes with the *square* of speed, so
-  arriving too fast is not something steering can rescue. Each gate has a
-  target speed derived from the corner that follows it.
-- **Pitch holds the flight path and nothing else**, aimed at the gate's own
-  height rather than the lookahead point's. Every attempt to borrow pitch for
-  turning — a bank-proportional pull, or climbing through corners — turned
-  faster and ballooned 87 units over the gates, which is a miss just the same.
+- **The line** is a centripetal Catmull-Rom from the runway, up through a
+  climb-out point, through every gate, and down onto the threshold. Centripetal
+  matters: the uniform kind overshoots between unevenly spaced points, and in
+  a city street an overshoot is a wall.
+- **Bank to turn.** Roll until the lift points at where the line is going —
+  a point 0.6 s ahead along it — then pull. This is how the aeroplane actually
+  turns: banking alone barely does, and the pull is what bends the path. A
+  small upward bias in where the lift should point keeps it from sagging.
+- **The landing** follows the line to 22 above the ground 700 out and 10 at the
+  threshold. Over the tarmac it levels the wings, cuts the power and holds a
+  sink of about 2.5 until the wheels touch.
 
-**It does not yet complete a mission.** It flies about half of Green Valley
-cleanly, most gates dead centre, then loses one and goes around. See the TODO.
+On Canyon Run the line cuts the gorge's bends too fine and meets the wall, so
+the older **path-following autopilot** (`src/autopilot.js`) flies that demo. It
+aims at a point on the current leg clamped at the next gate, banks for the
+curvature the geometry needs, and brakes for corners. It does not complete
+a mission.
 
 ## Version
 
-The title screen shows the version in small letters at the bottom (`v1.1`).
+The title screen shows the version in small letters at the bottom (`v1.2`).
 It is set by `VERSION` in `src/main.js`, not in the page, so it reports the
 code the browser is actually running — if it shows an older number after a
 deploy, the browser is still on cached scripts and needs a hard refresh.
@@ -145,7 +143,9 @@ src/rings.js    route generation, terrain clearance, gate crossing detection
 src/canyon.js   the carved gorge: centreline, depth profile, distance queries
 src/scenery.js  sky, lighting, clouds
 src/city.js     City Towers: streets, buildings, shader windows, traffic, colliders
-src/autopilot.js path-following autopilot; flies the attract-mode demo
+src/autopilot.js path-following autopilot; flies the canyon's demo
+src/linepilot.js racing-line pilot; flies every other demo, takeoff to landing
+src/alps.js     Alpine Valley: mountains, valleys, rivers, lake, forests, summit flags
 src/camera.js   chase and cockpit cameras
 src/hud.js      DOM HUD, off-screen target arrow
 src/audio.js    synthesised engine, chimes and crash noise (no audio files)
@@ -290,6 +290,44 @@ it flyable instead is spacing: gates every 430 m, close enough that the
 straight line between consecutive ones never strays more than 60 m from the
 centreline, against walls at 150 m.
 
+### The mountains
+
+Alpine Valley replaces the island relief with a range of its own, and like the
+canyon and the city one object (`src/alps.js`) owns the shape: the terrain asks
+it how high the ground is, the route asks it where the valleys are.
+
+- **The range** is ridged noise — inverted, squared, four octaves — on a base
+  of 380, with peaks to about 1,650. It rises further towards the edge of the
+  map, in ridges, so the horizon is mountains rather than the end of the mesh.
+- **Two valleys**, each a smoothed centreline with a floor height, a floor
+  width and a river line written as tables along its length. They are carved
+  glacial-style: a flat floor, a curved toe, then steep walls. The walls are
+  ribbed and the edge of the floor wanders with noise; without that they come
+  out as smooth planes. The main valley is wide and level where the airfield
+  is and climbs to 450 at its head; the side valley comes down from 470.
+- **The lake** at the bottom takes both rivers. It is just the sea plane showing
+  through a basin, so it needs no mesh of its own.
+- **The summit** stands between the two valley heads: a cone 700 high with a
+  small flat top, ridged on its flanks, restored after the valleys are carved
+  so their heads cannot bite into it. Two poles stand on top, either side of
+  the gate, with flags that flutter.
+- **Colour** follows the way mountains look: meadow on the valley floors,
+  dark forest up to the tree line at 540, pasture above it, bare rock on
+  anything steep or high, and snow above a ragged snow line — on gentle ground
+  first, and on steeper faces the higher it gets. The summit always has its cap.
+- **Props**: rivers as ribbons on the valley floors, about 3,400 pines in
+  patches below the tree line, chalets beside the runway and on the lake shore,
+  and a church. Trees, chalets and the poles are all solid.
+
+There is no climb-out corridor on this level. Capping a straight trench across
+the range would cut through the mountains, and the runway points up the main
+valley, so the valley is the way out and the lake is the way in.
+
+The route: off the runway up the main valley, following the river, climbing
+as the valley does; over the summit between the flags, with the bottom of the
+ring 10 above the snow; down the side valley along its river; out over the lake
+and round onto final. 22 gates, 16 of them over a valley floor.
+
 ### The city
 
 City Towers is flown *in* the streets, not over the roofs. Like the canyon, the
@@ -391,6 +429,13 @@ import `three`. The suite builds every level and asserts:
   its edge, rises monotonically and never leaves the unit circle; the arrows
   only ever produce key-like −1/0/+1, with real diagonals, and register in
   every direction at 90% travel.
+- **The mountains** — at least 14 gates follow the valleys; the summit is
+  where it should be, the summit gate's lowest point is a little above the
+  top, there is a pole either side of it and nothing solid inside it. Then
+  the line pilot flies the route from the departure gate at 100 and 115 kt and
+  must take every gate without touching the ground or a tree.
+- **The demo** — on every level but the canyon, the racing-line pilot takes off,
+  flies every gate and lands, under the same rules as a player.
 - **The city** — the city gates are below the surrounding rooftops, every leg
   between them clears every building by at least 12, the last gate fits
   inside the Arche's opening, and each skybridge has a gate under it that the
@@ -419,13 +464,11 @@ smoke signal, not a specification.
 - [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
 - [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
 - [ ] Ghost replay of your best run
-- [ ] The autopilot stalls out around gate 9 of 18 on Green Valley,
-      at the same gates whatever the speed — so it is not
-      a turn-radius limit but something structural about chained short legs in
-      the crosswind arc. Cross-track control along the leg, instead of pure
-      pursuit to the gate, is the next thing to try
-- [ ] Once it completes a mission, retire the weak flight probe in the test
-      suite and assert route completability with the real autopilot instead
+- [ ] The racing-line pilot meets the wall on Canyon Run's bends; a line that
+      keeps to the gorge's centreline between gates, instead of a spline through
+      them, should let it fly the canyon demo too and retire the old autopilot
+- [ ] Retire the weak flight probe in the test suite; the line pilot already
+      asserts what it only reports
 - [ ] Gamepad support via the Gamepad API
 - [ ] Phone: a rudder control (yaw is currently keyboard-only)
 - [ ] Phone: pick stick or arrows as the default once both have been flown
@@ -440,9 +483,10 @@ smoke signal, not a specification.
       there would be the obvious finale before the Arche
 - [ ] City Towers at dusk: the window shader already has lit windows; at night
       they would carry the whole look
-- [ ] The city's line-following test pilot completes the street run at 120 kt;
-      it could fly the attract-mode demo there instead of the autopilot, which
-      loses the route after the first gate and never reaches the city
+- [ ] Alpine Valley: waterfalls off the valley walls, and something moving —
+      a cable car up to the summit, or birds circling below it
+- [ ] Alpine Valley: rivers are flat ribbons; a little white water where the
+      valley floor steepens would sell the slope
 - [ ] Cars pass through each other at junctions; traffic lights, or at least a
       pause at the crossing, would fix it
 - [ ] Engine audio is a bit coarse — the drone could use a second detuned
