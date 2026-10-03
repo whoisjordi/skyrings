@@ -7,6 +7,7 @@
 
 import { createFlock } from './flock/flock.js';
 import { createDragon } from './flock/dragon.js';
+import { createTextFormation } from './flock/text.js';
 
 /**
  * A coarse height grid over a box, bilinear in between: the flock asks for
@@ -49,31 +50,69 @@ export function dragonAxis(cfg, spec, gates) {
 }
 
 /**
+ * Where a text show hangs: up the runway axis, `distance` from the start,
+ * high enough to clear the ground under it, facing the start.
+ */
+export function placeText(spec, text, airport, heightAt) {
+  const st = airport.start, ax = airport.axis;
+  const x = st.x + ax.x * spec.distance, z = st.z + ax.z * spec.distance;
+  const half = text.width / 2 + 20;
+  let top = -Infinity;
+  for (let k = -1; k <= 1; k += 0.1) {
+    for (const d of [-40, 0, 40]) top = Math.max(top, heightAt(x - ax.z * half * k + ax.x * d, z + ax.x * half * k + ax.z * d));
+  }
+  const y = Math.max(spec.altitude, top + spec.minAGL + text.height / 2);
+  return { center: [x, y, z], facing: [st.x, st.z] };
+}
+
+/**
  * @param {object} cfg       level config
- * @param {object} spec      one entry of its `dragons` list
+ * @param {object} spec      one entry of its `dragons` list: a dragon round a
+ *                           run of gates, or `{ text }` for a text show
  * @param {Array} gates      the route
  * @param {Function} heightAt
- * @param {object} [o]       { phone: true } for fewer drones
+ * @param {object} [o]       { phone: true } for fewer drones; `airport` for text
  */
 export function createDrones(cfg, spec, gates, heightAt, o = {}) {
-  const idx = dragonAxis(cfg, spec, gates);
   const salt = spec.seed ?? 0;
-  const axis = idx.map((i) => [gates[i].position.x, gates[i].position.y, gates[i].position.z]);
-  const dragon = createDragon({
-    ...spec.shape,
-    axis,
-    seed: cfg.seed ^ 0xd2a6 ^ salt,
-    spacing: (spec.shape?.spacing ?? 5.2) * (o.phone ? 1.6 : 1),
-  });
-  const flock = createFlock({ count: dragon.count, seed: cfg.seed ^ 0xf10c ^ salt, rules: spec.rules ?? {} });
-  flock.setFormation(dragon);
+  // Phones get the base shape with fewer drones; a PC gets `desktop` on top.
+  const look = { ...(spec.shape ?? {}), ...(o.phone ? {} : spec.desktop ?? {}) };
+  const sparse = o.phone ? 1.6 : 1;
+  let formation, idx = [], box;
+
+  if (spec.text) {
+    const opts = { text: spec.text, seed: cfg.seed ^ salt, ...look, spacing: (look.spacing ?? 3.2) * sparse };
+    // Built once to measure it, then again where it belongs.
+    const probe = createTextFormation({ ...opts, center: [0, 0, 0], facing: [0, 1] });
+    const at = placeText(spec, probe, o.airport, heightAt);
+    formation = createTextFormation({ ...opts, ...at });
+    const r = formation.width / 2 + 100;
+    box = [at.center[0] - r, at.center[2] - r, at.center[0] + r, at.center[2] + r];
+  } else {
+    idx = dragonAxis(cfg, spec, gates);
+    const axis = idx.map((i) => [gates[i].position.x, gates[i].position.y, gates[i].position.z]);
+    formation = createDragon({
+      ...look,
+      axis,
+      seed: cfg.seed ^ 0xd2a6 ^ salt,
+      spacing: (look.spacing ?? 5.2) * sparse,
+    });
+    const pad = 400;
+    box = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const [x, , z] of axis) {
+      box = [Math.min(box[0], x - pad), Math.min(box[1], z - pad), Math.max(box[2], x + pad), Math.max(box[3], z + pad)];
+    }
+  }
+  // Separation scaled to the show's own spacing: a dense show would
+  // otherwise have every drone pushing at slots it was built to sit in.
+  const spacing = (look.spacing ?? (spec.text ? 3.2 : 5.2)) * sparse;
+  const rules = { separationDist: Math.min(2.6, spacing * (spec.text ? 0.55 : 0.4)), ...(spec.rules ?? {}) };
+  const flock = createFlock({ count: formation.count, seed: cfg.seed ^ 0xf10c ^ salt, rules });
+  flock.setFormation(formation);
   flock.settle();
 
-  // Ground cache over the coil and some way round it.
-  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  for (const [x, , z] of axis) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-  const pad = 400;
-  const ground = cacheHeights(heightAt, x0 - pad, z0 - pad, x1 + pad, z1 + pad);
+  // Ground cache over the show and some way round it.
+  const ground = cacheHeights(heightAt, ...box);
 
   // The aeroplane as a threat: velocity and acceleration from its own
   // motion, so the dodge follows a turn rather than its tangent.
@@ -82,7 +121,7 @@ export function createDrones(cfg, spec, gates, heightAt, o = {}) {
   const env = { threats: [threat], ground };
 
   return {
-    flock, dragon, axisGates: idx, ground,
+    flock, formation, dragon: spec.text ? null : formation, axisGates: idx, ground,
     /** Forget the aeroplane's last position (after a reset or a teleport). */
     resetThreat() { have = false; },
     /**

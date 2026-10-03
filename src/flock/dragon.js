@@ -26,6 +26,7 @@ function mulberry32(seed) {
 
 export const DRAGON_DEFAULTS = {
   length: 560,           // head tip to tail tip
+  scale: 1,              // of the body's girth and features, not the coil
   speed: 26,             // the head, along its path
   radius: 60,            // of the coil round the axis: its inside hugs the gates
   radiusSwing: 8,        // wider going out, tighter coming back
@@ -315,10 +316,15 @@ export function createDragon(o) {
     TT.set(t, k * 3); UP.set(up, k * 3); SD.set(sd, k * 3);
   }
 
-  const slots = dedupe(makeSlots(opt, rnd), opt.spacing * 0.45);
+  // The shape is laid out at scale 1 and blown up: `length` and `spacing`
+  // are in world units, so a bigger dragon with the same spacing gets more
+  // drones, not sparser ones.
+  const scale = opt.scale;
+  const base = { ...opt, length: opt.length / scale, spacing: opt.spacing / scale };
+  const slots = dedupe(makeSlots(base, rnd), base.spacing * 0.45);
   const n = slots.length;
   const pos = new Float32Array(n * 3), vel = new Float32Array(n * 3), col = new Float32Array(n * 3);
-  const L = opt.length;
+  const L = base.length;
 
   // Smoothly interpolated frame at a path distance (wraps round the loop).
   const fr = new Float64Array(12);
@@ -366,8 +372,9 @@ export function createDragon(o) {
       // Up-and-down wave along the body; the head stays steadier.
       const und = opt.undulation * smoothstep(20, 120, s)
         * Math.sin((TAU * s) / opt.waveLength - time * 1.6);
-      const F = frame(headAt - s);
-      const vv = v + und;
+      const F = frame(headAt - s * scale);
+      const vv = (v + und) * scale;
+      u *= scale;
       const o3 = k * 3;
       for (let c = 0; c < 3; c++) {
         pos[o3 + c] = F[c] + F[9 + c] * u + F[6 + c] * vv;

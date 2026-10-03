@@ -1156,21 +1156,47 @@ function checkFlock() {
 // the water, the gates it coils round are the ones over the lake, and the demo
 // pilot flies the whole mission through it with no drone ever touched.
 function checkDragon(cfg, w) {
-  const all = cfg.dragons.map((spec) => createDrones(cfg, spec, w.gates, w.terrain.heightAt));
+  const all = cfg.dragons.map((spec) => createDrones(cfg, spec, w.gates, w.terrain.heightAt, { airport: w.airport }));
+  const ground = (x, z) => Math.max(0, w.terrain.heightAt(x, z));
   const out = all.map(({ dragon, flock, axisGates }) => {
-    ok(axisGates.length >= 3, `a dragon coils round only ${axisGates.length} gates`);
-    let low = Infinity;
-    for (let a = 0; a < dragon.loopLength; a += 4) {
-      const p = dragon.pathPoint(a);
-      low = Math.min(low, p[1] - Math.max(0, w.terrain.heightAt(p[0], p[2])));
+    let low = Infinity, name;
+    if (dragon) {
+      name = `the dragon round gates ${axisGates[0]}-${axisGates.at(-1)}`;
+      ok(axisGates.length >= 3, `a dragon coils round only ${axisGates.length} gates`);
+      for (let a = 0; a < dragon.loopLength; a += 4) {
+        const p = dragon.pathPoint(a);
+        low = Math.min(low, p[1] - ground(p[0], p[2]));
+      }
+      ok(low > 40, `${name} comes within ${low.toFixed(0)} of the ground`);
+    } else {
+      name = 'the logo';
+      const p = flock.pos;
+      let sx = 0, sy = 0, sz = 0;
+      for (let i = 0; i < flock.count; i++) {
+        low = Math.min(low, p[i * 3 + 1] - ground(p[i * 3], p[i * 3 + 2]));
+        sx += p[i * 3]; sy += p[i * 3 + 1]; sz += p[i * 3 + 2];
+      }
+      ok(low > 60, `the logo comes within ${low.toFixed(0)} of the ground`);
+      // In view from the start of the runway: ahead, and nothing in between.
+      const c = [sx / flock.count, sy / flock.count, sz / flock.count];
+      const st = w.airport.start, eye = [st.x, w.airport.surfaceY + 4, st.z];
+      const d = [c[0] - eye[0], c[1] - eye[1], c[2] - eye[2]];
+      const dl = Math.hypot(...d);
+      const off = (Math.acos((d[0] * w.airport.axis.x + d[2] * w.airport.axis.z) / Math.hypot(d[0], d[2])) * 180) / Math.PI;
+      const up = (Math.asin(d[1] / dl) * 180) / Math.PI;
+      let blocked = false;
+      for (let t = 0.02; t < 1; t += 0.01) {
+        if (eye[1] + d[1] * t < ground(eye[0] + d[0] * t, eye[2] + d[2] * t)) { blocked = true; break; }
+      }
+      ok(off < 15 && up < 25 && !blocked, `the logo from the runway: ${off.toFixed(0)} deg off the axis, ${up.toFixed(0)} deg up, ${blocked ? 'hidden' : 'in view'}`);
+      name += ` (${off.toFixed(0)} deg off the runway axis, ${up.toFixed(0)} deg up, in view from the start)`;
     }
-    ok(low > 40, `the dragon round gates ${axisGates[0]}-${axisGates.at(-1)} comes within ${low.toFixed(0)} of the ground`);
-    return { count: flock.count, gates: axisGates, low, turns: dragon.turns, flock };
+    return { count: flock.count, gates: axisGates, low, turns: dragon ? dragon.turns : 0, flock, name };
   });
   const d = flyDemo(w, { update: (...a) => all.forEach((x) => x.update(...a)) });
-  ok(d.why === 'landed', `demo pilot through the dragons: ${d.gates}/${d.total} gates, ${d.why}`);
+  ok(d.why === 'landed', `demo pilot through the shows: ${d.gates}/${d.total} gates, ${d.why}`);
   for (const o of out) {
-    ok(o.flock.stats.hits === 0, `the demo pilot touched ${o.flock.stats.hits} drones of the dragon round gates ${o.gates[0]}-${o.gates.at(-1)}`);
+    ok(o.flock.stats.hits === 0, `the demo pilot touched ${o.flock.stats.hits} drones of ${o.name}`);
     o.nearest = o.flock.stats.nearest;
   }
   return { dragons: out, demo: d };
@@ -1220,7 +1246,7 @@ for (const cfg of LEVELS) {
   if (cfg.dragons) {
     const g = checkDragon(cfg, build(cfg));
     for (const o of g.dragons) {
-      console.log(`  dragon  ${o.count} drones round gates ${o.gates[0]}-${o.gates.at(-1)}, ${o.turns} turns, path ${o.low.toFixed(0)}+ above ground`
+      console.log(`  drones  ${o.count} in ${o.name}${o.turns ? `, ${o.turns} turns` : ''}, ${o.low.toFixed(0)}+ above ground`
         + `, nearest to the demo pilot ${o.nearest.toFixed(0)}`);
     }
     console.log(`          demo ${g.demo.why} after ${g.demo.t.toFixed(0)}s`);

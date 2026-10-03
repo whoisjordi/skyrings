@@ -304,19 +304,32 @@ export const LEVELS = [
         spacing: 380,
         // High enough over the first gates for the valley dragon to coil
         // beneath them.
-        main: { from: 0.56, to: 0.96, agl: [[0.5, 145], [0.7, 140], [0.8, 120], [1, 150]] },
+        main: { from: 0.56, to: 0.96, agl: [[0.5, 175], [0.7, 170], [0.8, 130], [1, 150]] },
         trib: { from: 0.95, to: 0.12, agl: [[0, 85], [0.8, 100], [1, 140]] },
         summitClearance: 10,
         // High over the lake, where the dragon is, then down onto final.
-        lake: [[-700, 1850, 150], [-350, 2130, 165], [50, 2170, 160], [330, 2080, 130]],
+        lake: [[-700, 1850, 185], [-350, 2130, 200], [50, 2170, 190], [330, 2080, 150]],
         finalAt: 1300, finalAGL: 60,
         maxTurn: 30,
       },
     },
-    // The drone shows: ~1500 lights each in the shape of a Chinese dragon.
-    // See docs/flock.md. `shape` takes createDragon options and `rules`
-    // createFlock rules; the defaults apply otherwise.
+    // The drone shows: Chinese dragons coiled round the route, and the
+    // NXTdev name up the valley. See docs/flock.md. `shape` takes
+    // createDragon (or createTextFormation) options, `desktop` overrides them
+    // on a PC — bigger and far denser — and `rules` takes createFlock rules.
     dragons: [
+      {
+        // The name in the sky, in nxtdev.sk blue, facing the runway: the
+        // first thing in view at takeoff.
+        text: 'NXTdev',
+        seed: 0x7e,
+        distance: 2700,       // up the runway axis from the start
+        altitude: 600,
+        minAGL: 110,          // above the highest ground under it
+        planeRadius: 8,
+        shape: { height: 140, spacing: 3.6 },
+        desktop: { height: 220, spacing: 2.9 },
+      },
       {
         // Up the valley, coiled round rings 2-4: in sight from the runway.
         gates: [1, 3],
@@ -328,11 +341,13 @@ export const LEVELS = [
             belly: [0.85, 0.95, 0.7], mane: [0.2, 0.9, 0.75],
           },
         },
+        desktop: { scale: 1.8, length: 1000, spacing: 4, radius: 78, speed: 32 },
       },
       {
         // Over the lake, round the gates that cross the water.
         minClearance: 100,   // a gate's height over the water to be coiled round
         planeRadius: 8,
+        desktop: { scale: 1.8, length: 1000, spacing: 4, radius: 78, speed: 32 },
       },
     ],
     city: null,

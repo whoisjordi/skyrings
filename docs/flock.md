@@ -308,3 +308,17 @@ while flying.
 - **Measured**: 1,486 drones (640 on phones), ~1.3 ms per 30 Hz tick, calm slot
   error 0.17, tunnel 34 from the aeroplane's centre, startle front 2.7 s across
   480 units at 34 ms delay vs 9.3 s at 200 ms.
+
+## Later the same day (v1.5)
+
+- **Several shows per level** (`dragons` list): a jade dragon round rings 2–4,
+  the red-gold one over the lake, and "NXTdev" in blue drones up the valley,
+  facing the runway (`src/flock/text.js`, a stroke-font text formation).
+- **PC vs phone**: each show has `shape` (phone and base) and `desktop`
+  overrides. On a PC the dragons use `scale: 1.8, length: 1000, spacing: 4`,
+  the logo `height: 220, spacing: 2.9` — ~20,600 drones in all.
+- **Fast path** in the flock: an agent that is calm, unthreatened, has no
+  startled or crowding neighbour and sits within 1 unit of its slot just
+  rides the slot and refreshes its neighbours 8x less often. A calm 1,500
+  dragon went from ~0.9 to ~0.3 ms per tick. Separation distance is scaled to
+  each show's spacing so dense shows stay on the fast path.

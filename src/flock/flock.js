@@ -57,6 +57,9 @@ export const DEFAULT_RULES = {
 
   slotGain: 2,            // 1/s: slot error -> desired velocity
   slotResponse: 4,        // 1/s: desired velocity -> acceleration
+  idleCalm: 0.02,         // below this panic, and
+  idleSnap: 1.0,          // this close to its slot, an agent just rides it
+  idleRefresh: 8,         // and refreshes its neighbours this many times less often
 
   home: null,             // {x, y, z, radius}: soft bounds with no formation
   homeAccel: 12,
@@ -102,6 +105,7 @@ export function createFlock({ count, seed = 1, rules = {}, center = [0, 0, 0], s
   const role = new Uint8Array(n);
   const delay = new Uint8Array(n);
   const jitter = new Float32Array(n);   // each agent's draw in [-1, 1]
+  const idle = new Uint8Array(n);       // riding its slot on the fast path
   const nbr = new Int32Array(n * K);
   const nbrN = new Uint8Array(n);
   const groundY = new Float32Array(n).fill(-1e9);
@@ -260,7 +264,13 @@ export function createFlock({ count, seed = 1, rules = {}, center = [0, 0, 0], s
     }
 
     grid.build(pos, n, (i) => role[i] === ROLE.PREDATOR);
-    for (let i = (tick % R.nbrRefresh); i < n; i += R.nbrRefresh) refreshNeighbours(i);
+    // Agents resting on their slots keep their neighbours far longer: in a
+    // formation, who is next to whom hardly changes.
+    const slow = R.nbrRefresh * R.idleRefresh;
+    for (let i = 0; i < n; i++) {
+      const every = idle[i] ? slow : R.nbrRefresh;
+      if ((i + tick) % every === 0) refreshNeighbours(i);
+    }
     if (tick === 0) for (let i = 0; i < n; i++) refreshNeighbours(i);
 
     const ground = env.ground;
@@ -280,7 +290,7 @@ export function createFlock({ count, seed = 1, rules = {}, center = [0, 0, 0], s
       let pn = panic[i] * decay;
 
       // ---- 1. threats ----------------------------------------------------
-      let tx = 0, ty = 0, tz = 0;
+      let tx = 0, ty = 0, tz = 0, threatened = false;
       for (let k = 0; k < nt; k++) {
         const t = threats[k];
         if (x < t.x0 || x > t.x1 || y < t.y0 || y > t.y1 || z < t.z0 || z > t.z1) continue;
@@ -299,6 +309,7 @@ export function createFlock({ count, seed = 1, rules = {}, center = [0, 0, 0], s
         }
         const rr = R.threatRadius + t.r;
         if (bd > rr * rr) continue;
+        threatened = true;
         const d = Math.sqrt(bd);
         let dx, dy, dz;
         if (d > 1e-3) { dx = (x - bx) / d; dy = (y - by) / d; dz = (z - bz) / d; } else {
@@ -343,6 +354,34 @@ export function createFlock({ count, seed = 1, rules = {}, center = [0, 0, 0], s
       const hb = history.vecBase(f), sb = history.scalarBase(f);
       const hp = history.pos, hv = history.vel, hpn = history.panic;
       const c = nbrN[i];
+
+      // Fast path: calm, nothing near, no neighbour startled or crowding it,
+      // already on the slot. The bird rules would add next to nothing here, so the agent
+      // simply rides its slot. This is most of a formation most of the time,
+      // and it is what lets a big show stay cheap.
+      if (fp && !threatened && pn < R.idleCalm) {
+        // Not if a neighbour is too close: then separation has work to do.
+        let qp = 0, crowd = false;
+        const sep2 = R.separationDist * R.separationDist;
+        for (let r = 0; r < c; r++) {
+          const j = nbr[i * K + r];
+          const pj = hpn[sb + j];
+          if (pj > qp) qp = pj;
+          const jo = j * 3;
+          const dx = x - pos[jo], dy = y - pos[jo + 1], dz = z - pos[jo + 2];
+          if (dx * dx + dy * dy + dz * dz < sep2) crowd = true;
+        }
+        const ex = fp[o] - fv[o] * dt - x, ey = fp[o + 1] - fv[o + 1] * dt - y, ez = fp[o + 2] - fv[o + 2] * dt - z;
+        if (!crowd && qp * R.startleGain < R.idleCalm && ex * ex + ey * ey + ez * ez < R.idleSnap * R.idleSnap) {
+          panic[i] = pn;
+          pos[o] = fp[o]; pos[o + 1] = fp[o + 1]; pos[o + 2] = fp[o + 2];
+          vel[o] = fv[o]; vel[o + 1] = fv[o + 1]; vel[o + 2] = fv[o + 2];
+          if (bright[i] < 1) bright[i] = Math.min(1, bright[i] + dt * 0.8);
+          idle[i] = 1;
+          continue;
+        }
+      }
+      idle[i] = 0;
       let sx = 0, sy = 0, sz = 0, axs = 0, ays = 0, azs = 0, cx = 0, cy = 0, cz = 0, np = 0;
       const sep = R.separationDist;
       for (let r = 0; r < c; r++) {

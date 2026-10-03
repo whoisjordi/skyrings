@@ -119,10 +119,10 @@ function loadLevel(index) {
   root.add(terrain.group, airport.group, rings.group, createClouds(cfg), applySky(scene, cfg.palette), plane.object);
   if (props) root.add(props.group);
 
-  // The night mission's sky, and its dragons of drones.
+  // The night mission's sky, and its drone shows: dragons and a logo.
   const sky = createNightSky(cfg);
   if (sky) root.add(sky);
-  const drones = (cfg.dragons ?? []).map((spec) => createDrones(cfg, spec, gates, terrain.heightAt, { phone: !!touch }));
+  const drones = (cfg.dragons ?? []).map((spec) => createDrones(cfg, spec, gates, terrain.heightAt, { phone: !!touch, airport }));
   const droneViews = drones.map((d) => createFlockView(d.flock));
   for (const v of droneViews) root.add(v.object);
   scene.add(root);
