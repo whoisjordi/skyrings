@@ -488,6 +488,132 @@ function checkCanyon(cfg, w) {
   return { count: inGorge.length, length: canyon.length, worstChord, minBelowRim, nearest };
 }
 
+// --- the city --------------------------------------------------------------
+// City Towers promises that the route is flown *in* the streets: the gates sit
+// below the rooftops, the legs between them are clear of every building, and
+// the special gates really are under the bridges and inside the Arche. Then a
+// line-following pilot flies the street run under the real flight model, which
+// is the proof that it can be done rather than an argument that it should be.
+function checkCity(cfg, w) {
+  const { city, gates } = w;
+  const spec = cfg.city;
+  const b = spec.bounds;
+  const r = cfg.route.ringRadius;
+
+  // The street run starts at the first gate on the city's edge.
+  const first = gates.findIndex((g) => g.position.z > b.z0 - 200
+    && Math.abs(g.position.x) < b.x1 && g.position.y - spec.ground < 120);
+  ok(first > 0, 'no gate found at the city entrance');
+  const run = gates.slice(first);
+
+  // Among the buildings, not above them.
+  const below = run.filter((g) => city.skylineNear(g.position.x, g.position.z, 110) > g.position.y + 40);
+  ok(below.length >= run.length * 0.6,
+    `only ${below.length}/${run.length} city gates are below the surrounding rooftops`);
+
+  // Every leg is clear of every building, with room for the wings.
+  let tightest = Infinity, tightAt = -1;
+  for (let i = first; i < gates.length - 1; i++) {
+    const a = gates[i].position, c = gates[i + 1].position;
+    const n = Math.ceil(a.distanceTo(c) / 3);
+    for (let k = 0; k <= n; k++) {
+      const p = a.clone().lerp(c, k / n);
+      let m = 0;
+      while (m < 40 && !city.collides(p.x, p.y, p.z, m)) m += 2;
+      if (m < tightest) { tightest = m; tightAt = i; }
+    }
+  }
+  ok(tightest >= 12, `leg ${tightAt} passes within ${tightest} of a building`);
+
+  // The last gate is inside the Arche's opening, with room round the ring.
+  const last = gates[gates.length - 1].position;
+  const A = city.arch;
+  ok(last.x - r > A.x0 && last.x + r < A.x1, 'the Arche gate does not fit between the pillars');
+  ok(last.y - r > A.y0 && last.y + r < A.y1, 'the Arche gate does not fit under the roof');
+  ok(Math.abs(last.z - A.z) < 5, 'the last gate is not in the Arche');
+
+  // Each skybridge has a gate under it, and the ring clears the bridge.
+  for (const br of spec.bridges) {
+    const under = run.find((g) => g.position.x > br.x0 - 5 && g.position.x < br.x1 + 5
+      && g.position.z > br.z0 - 5 && g.position.z < br.z1 + 5);
+    ok(!!under, `no gate under the bridge at ${br.x0},${br.z0}`);
+    if (under) {
+      ok(under.position.y + r < spec.ground + br.y0 - 4,
+        `the gate under the bridge at ${br.x0},${br.z0} touches it`);
+    }
+  }
+
+  const fly = (speed) => flyCityLine(w, first - 1, speed);
+  const slow = fly(100), fast = fly(120);
+  for (const f of [slow, fast]) {
+    ok(!f.crash && f.gates === gates.length,
+      `line pilot at ${f.speed}kt: ${f.gates}/${gates.length} gates, ${f.crash ?? 'no crash'}`);
+  }
+  return { first, run: run.length, below: below.length, tightest, slow, fast, stats: city.stats };
+}
+
+/**
+ * Flies the racing line through the city under the real flight model.
+ *
+ * The line is a centripetal Catmull-Rom through the gates. The pilot steers
+ * bank-to-turn: roll until the lift points at where the line is going, then
+ * pull. It starts in the air at the last open-country gate.
+ */
+function flyCityLine(w, from, speed) {
+  const { terrain, airport, gates, city } = w;
+  const plane = new Plane(LEVELS[0].palette);
+  const rings = new RingSet({ route: { ringRadius: w.rings.radius } }, gates);
+  const world = { heightAt: terrain.heightAt, airport };
+
+  const pts = gates.slice(from).map((g) => g.position.clone());
+  const out = pts[pts.length - 1].clone().addScaledVector(airport.axis, 250);
+  out.y -= 20;
+  pts.push(out);
+  const line = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const N = 4000;
+  const samples = line.getSpacedPoints(N);
+  const step = line.getLength() / N;
+
+  plane.reset(pts[0].x, pts[0].y, pts[0].z, 0);
+  Object.assign(plane, {
+    onGround: false, speed, throttle: 0.8, airborneFor: 10, clearedRunway: true,
+    gearDown: false, gearPos: 0,
+  });
+  plane.quaternion.setFromRotationMatrix(
+    new THREE.Matrix4().lookAt(pts[0], samples[5], new THREE.Vector3(0, 1, 0)));
+  rings.index = from + 1;
+
+  const UP = new THREE.Vector3(0, 1, 0);
+  let at = 0, t = 0, crash = null, worst = 0;
+  while (t < 240 && at < N - 5) {
+    let best = Infinity;
+    for (let i = at; i < Math.min(N, at + 200); i++) {
+      const d = samples[i].distanceToSquared(plane.position);
+      if (d < best) { best = d; at = i; }
+    }
+    worst = Math.max(worst, Math.sqrt(best));
+
+    const target = samples[Math.min(N, at + Math.round((plane.speed * 0.6) / step))];
+    const fwd = plane.forward.clone(), up = plane.up.clone(), right = plane.right.clone();
+    const dir = target.clone().sub(plane.position).normalize();
+    // Where the lift should point: at the line, with a little up to hold height.
+    const lift = dir.clone().addScaledVector(fwd, -dir.dot(fwd)).multiplyScalar(2).addScaledVector(UP, 0.25);
+    lift.addScaledVector(fwd, -lift.dot(fwd));
+    const roll = Math.atan2(lift.dot(right), lift.dot(up));
+    const pitch = Math.atan2(dir.dot(up), dir.dot(fwd));
+
+    const ev = plane.update(STEP, {
+      pitch: clamp(pitch * 15, -1, 1), roll: clamp(roll * 3, -1, 1), yaw: 0,
+      throttle: plane.speed < speed ? 1 : -1, brake: plane.speed > speed + 12,
+    }, world);
+    rings.update(STEP, plane.position);
+    if (ev && ev.type === 'crash') { crash = ev.reason; break; }
+    if (city.collides(plane.position.x, plane.position.y, plane.position.z)) { crash = 'hit a building'; break; }
+    t += STEP;
+  }
+  return { speed, gates: rings.index, crash, t, worst };
+}
+
 // --- line of sight ----------------------------------------------------------
 // The next gate has to be in front of you. Flying a route where it is off the
 // side of the screen means navigating by the HUD arrow instead of by looking.
@@ -860,6 +986,13 @@ for (const cfg of LEVELS) {
       + `  chords stray ${c.worstChord.toFixed(0)}/${cfg.canyon.halfWidth}`
       + `  gates ${c.minBelowRim.toFixed(0)}+ below the rim`
       + `  runway clear by ${c.nearest.toFixed(0)}`);
+  }
+  if (cfg.city) {
+    const c = checkCity(cfg, build(cfg));
+    console.log(`  city    ${c.stats.buildings} buildings, ${c.stats.trees} trees, ${c.stats.cars}+${c.stats.parked} cars`
+      + `  ${c.below}/${c.run} gates below the rooftops  legs clear by ${c.tightest}+`);
+    console.log(`  line    ${c.slow.speed}kt ${c.slow.gates}/${build(cfg).gates.length} in ${c.slow.t.toFixed(0)}s off-line ${c.slow.worst.toFixed(0)}`
+      + `  |  ${c.fast.speed}kt ${c.fast.gates} in ${c.fast.t.toFixed(0)}s off-line ${c.fast.worst.toFixed(0)}`);
   }
   const phys = checkPhysics(cfg, build(cfg));
   console.log(`  flight  rotate ${phys.takeoffTime.toFixed(1)}s / ${phys.rollDist.toFixed(0)}m`
