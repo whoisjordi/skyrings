@@ -424,6 +424,124 @@ export function buildCanyonRoute(cfg, airport, canyon, heightAt) {
   });
 }
 
+/**
+ * Threads the route through the city's streets.
+ *
+ * Like the canyon, the geometry comes first and the route is laid along it.
+ * The street run is described as a list of points in levels.js: at a corner
+ * the gate goes on the inside of the bend, where a turn of the configured
+ * radius would carry you, and the straights between are filled with gates so
+ * that none is more than `spacing` from the next. The legs between gates run
+ * down the middle of the streets, which the city keeps clear by construction.
+ *
+ * Getting there is an open-country loop: off the departure end, round to the
+ * right, and down the side of the field into the first street.
+ *
+ * @returns {{position:THREE.Vector3, quaternion:THREE.Quaternion}[]}
+ */
+export function buildCityRoute(cfg, airport, heightAt) {
+  const spec = cfg.city.route;
+  const G = cfg.city.ground;
+  const axis = airport.axis;
+  const base = airport.center;
+
+  // ---- the street run ------------------------------------------------------
+  const path = spec.path.map(([x, z, o]) => ({ p: new THREE.Vector3(x, 0, z), o: o ?? {} }));
+  const R = spec.cornerRadius;
+  const anchors = [];   // {position, dir, inPt, outPt}
+
+  path.forEach(({ p, o }, i) => {
+    const h = G + (o.h ?? spec.streetHeight);
+    if (o.corner) {
+      const din = p.clone().sub(path[i - 1].p).normalize();
+      const dout = path[i + 1].p.clone().sub(p).normalize();
+      const theta = Math.acos(Math.max(-1, Math.min(1, din.dot(dout))));
+      const inside = dout.clone().sub(din).normalize();
+      // The midpoint of a fillet of radius R sits this far inside the corner.
+      const mid = p.clone().addScaledVector(inside, R * (1 / Math.cos(theta / 2) - 1));
+      const tan = R * Math.tan(theta / 2);
+      mid.y = h;
+      anchors.push({
+        position: mid,
+        dir: din.clone().add(dout).normalize(),
+        inPt: p.clone().addScaledVector(din, -tan),
+        outPt: p.clone().addScaledVector(dout, tan),
+      });
+    } else {
+      const position = p.clone();
+      position.y = h;
+      const dir = o.face ? p.clone().sub(path[i - 1].p).normalize() : null;
+      anchors.push({ position, dir, inPt: position, outPt: position });
+    }
+  });
+
+  const street = [];   // {position, dir}
+  anchors.forEach((a, i) => {
+    street.push({ position: a.position, dir: a.dir });
+    const b = anchors[i + 1];
+    if (!b) return;
+    // Fill the straight between the end of one bend and the start of the
+    // next, spaced evenly along the way you actually fly — gate, out of the
+    // bend, down the street, into the next bend, gate.
+    const legs = [a.position, a.outPt, b.inPt, b.position]
+      .map((v) => new THREE.Vector3(v.x, 0, v.z));
+    const lens = legs.slice(1).map((v, k) => v.distanceTo(legs[k]));
+    const total = lens.reduce((x, y) => x + y, 0);
+    const chord = a.position.distanceTo(b.position);
+    const n = path[i + 1].o.fill === false ? 0 : Math.max(0, Math.ceil(chord / spec.spacing) - 1);
+    for (let k = 1; k <= n; k++) {
+      let s = (total * k) / (n + 1), j = 0;
+      while (j < lens.length - 1 && s > lens[j]) { s -= lens[j]; j++; }
+      const position = legs[j].clone().lerp(legs[j + 1], lens[j] ? s / lens[j] : 0);
+      position.y = lerp(a.position.y, b.position.y, k / (n + 1));
+      street.push({ position, dir: null });
+    }
+  });
+
+  // ---- off the runway and round into the first street ----------------------
+  const depart = base.clone().addScaledVector(axis, spec.departAt);
+  depart.y = base.y + spec.departHeight;
+  const entry = street[0].position;
+
+  const ctrl = [
+    depart,
+    ...spec.loop.map(([x, z, h]) => new THREE.Vector3(x, base.y + h, z)),
+    entry,
+  ];
+  const loop = sampleAdaptive(new THREE.CatmullRomCurve3(ctrl, false, 'catmullrom', 0.5), {
+    maxTurn: spec.maxTurn, maxSpacing: spec.loopSpacing, minSpacing: 170,
+  });
+  for (const p of loop) p.y = Math.max(p.y, heightAt(p.x, p.z) + MIN_CLEARANCE);
+  // The runway and the city entrance are both fixed; only the loop may lift.
+  loop[loop.length - 1] = entry;
+  raiseForClearance([base.clone(), ...loop], heightAt, MIN_CLEARANCE);
+
+  const nodes = [
+    { position: loop[0], dir: axis.clone() },
+    ...loop.slice(1, -1).map((position) => ({ position, dir: null })),
+    ...street,
+  ];
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const m = new THREE.Matrix4();
+  const d = new THREE.Vector3();
+  return nodes.map((node, i) => {
+    if (node.dir) d.copy(node.dir);
+    else {
+      d.subVectors(
+        nodes[Math.min(nodes.length - 1, i + 1)].position,
+        nodes[Math.max(0, i - 1)].position,
+      );
+    }
+    d.normalize();
+    m.lookAt(node.position, d.clone().add(node.position), up);
+    return {
+      position: node.position,
+      quaternion: new THREE.Quaternion().setFromRotationMatrix(m),
+    };
+  });
+}
+
 export class RingSet {
   constructor(cfg, gates) {
     this.group = new THREE.Group();

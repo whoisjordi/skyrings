@@ -8,8 +8,9 @@ import { Save } from './save.js';
 import { LEVELS, formatTime } from './levels.js';
 import { createTerrain, WORLD_SIZE, airportYOf, setTerrainQuality } from './terrain.js';
 import { createAirport } from './airport.js';
-import { buildRoute, buildCanyonRoute, RingSet } from './rings.js';
-import { applySky, createClouds, createCity } from './scenery.js';
+import { buildRoute, buildCanyonRoute, buildCityRoute, RingSet } from './rings.js';
+import { applySky, createClouds } from './scenery.js';
+import { createCity } from './city.js';
 import { createCanyon } from './canyon.js';
 import { Plane, TUNE } from './plane.js';
 import { ChaseCamera } from './camera.js';
@@ -89,13 +90,13 @@ function loadLevel(index) {
   const canyon = createCanyon(cfg, airportYOf(cfg));
   const terrain = createTerrain(cfg, canyon);
   const airport = createAirport(cfg);
-  const gates = canyon
-    ? buildCanyonRoute(cfg, airport, canyon, terrain.heightAt)
-    : buildRoute(cfg, airport, terrain.heightAt);
+  // Same idea for the city: the streets come first, the route runs down them.
+  const city = createCity(cfg);
+  let gates;
+  if (canyon) gates = buildCanyonRoute(cfg, airport, canyon, terrain.heightAt);
+  else if (city) gates = buildCityRoute(cfg, airport, terrain.heightAt);
+  else gates = buildRoute(cfg, airport, terrain.heightAt);
   const rings = new RingSet(cfg, gates);
-  // The city is built around the route so there is always a lane to fly.
-  const corridor = [airport.center, ...gates.map((g) => g.position), airport.center];
-  const city = createCity(cfg, terrain.heightAt, corridor);
   const plane = new Plane(cfg.palette);
 
   root.add(terrain.group, airport.group, rings.group, createClouds(cfg), applySky(scene, cfg.palette), plane.object);
@@ -154,8 +155,7 @@ function resetRun() {
   plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
 
   // Rebuild the ring set to reset gate order and colour, reusing the gates the
-  // level was built with — regenerating them here would risk drifting out of
-  // sync with the corridor the city was carved around.
+  // level was built with rather than generating them again.
   level.root.remove(level.rings.group);
   level.rings.dispose();
   level.rings = new RingSet(cfg, level.gates);
@@ -348,6 +348,9 @@ function frame(now) {
     runDemo(dt);
   }
 
+  // The traffic keeps moving behind the menus, and stops when you pause.
+  if (level && level.city && state !== 'paused') level.city.update(dt);
+
   Input.endFrame();
   renderer.render(scene, camera);
 }
@@ -499,6 +502,25 @@ if (touch) {
 
 // Don't let the aeroplane fly on while the tab is hidden.
 addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+
+// Hooks for the headless screenshot checks; not reachable without ?debug.
+if (new URLSearchParams(location.search).has('debug')) {
+  window.SKY = {
+    THREE, scene, camera, renderer, chase,
+    get level() { return level; },
+    get state() { return state; },
+    loadLevel,
+    startLevel,
+    /** Freeze the demo and look from a fixed point. */
+    look(from, to) {
+      state = 'shot';
+      hideScreens();
+      camera.position.set(...from);
+      camera.lookAt(...to);
+      camera.updateMatrixWorld();
+    },
+  };
+}
 
 initInput();
 loadLevel(0);

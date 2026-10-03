@@ -89,22 +89,101 @@ export const LEVELS = [
   {
     id: 'city',
     name: 'City Towers',
-    blurb: 'Thread the gates between the blocks. Watch your wingtips.',
+    blurb: 'Down the streets below the rooftops, under the skybridges, and home through La Grande Arche.',
     seed: 24601,
     amp: 120,
     mountain: 0.05,
-    airport: { x: 150, z: -150 },
-    runwayHeading: -Math.PI * 0.25,
-    target: 210,
-    route: {
-      count: 18, radius: 1650, altitude: 260, spread: 0.5, ringRadius: 34,
-      departAt: 900, joinRadius: 700, spacing: 850, maxTurn: 30,
-      loops: 1, finalAt: 1300,
+    // The runway points at the city's axis, so the way home is straight
+    // through the Arche and onto the threshold.
+    airport: { x: 0, z: -800 },
+    runwayHeading: 0,
+    target: 130,
+    route: { ringRadius: 32 },
+    city: {
+      ground: 20,                     // the airfield's level, so it all joins up
+      bounds: { x0: -1150, x1: 1150, z0: 290, z1: 1760 },
+      // Terrain inside this is levelled to the ground; it blends back out.
+      flatten: { x0: -1260, x1: 1260, z0: -420, z1: 1880, blend: 380 },
+      // [centre, facade-to-facade width, kind]. Width 120 is a boulevard you
+      // can fly down; 60 is a side street you cannot.
+      streetsX: [
+        [-1000, 60], [-750, 120], [-525, 60], [-300, 120],
+        [0, 200, 'plaza'],
+        [300, 120], [525, 60], [750, 120], [1000, 60],
+      ],
+      streetsZ: [[540, 120], [750, 60], [960, 120], [1170, 60], [1380, 120], [1600, 120]],
+      laneWide: 12,
+      laneNarrow: 10.5,
+      carGap: 95,
+      // Glass towers round the axis, tallest nearest it.
+      district: { halfWidth: 520, zMax: 1030, minH: 230, maxH: 640 },
+      routeMinH: 110,
+      routeMaxH: 280,
+      parks: [[-1080, 700], [880, 1700], [-640, 1700]],
+      arche: {
+        x: 0, z: 380, width: 220, depth: 170, height: 220,
+        opening: 120, base: 14, roof: 48, steps: 3, stepDepth: 14,
+      },
+      // The pairs of towers the skybridges hang between.
+      towers: [
+        { x0: -236, x1: -112, z0: 784, z1: 896, h: 400 },
+        { x0: 112, x1: 236, z0: 784, z1: 896, h: 450 },
+        { x0: -236, x1: -110, z0: 1204, z1: 1316, h: 260 },
+        { x0: -236, x1: -110, z0: 1444, z1: 1536, h: 220 },
+      ],
+      bridges: [
+        // Across the axis, between the twin towers.
+        { x0: -112, x1: 112, z0: 788, z1: 812, y0: 104, h: 20 },
+        // Across the boulevard on the long westbound run.
+        { x0: -186, x1: -160, z0: 1316, z1: 1444, y0: 96, h: 18 },
+      ],
+      // Sculptures on the esplanade, beside the slalom gates.
+      monoliths: [
+        { x: -60, z: 1470, w: 24, h: 95, color: 0xd8432e },
+        { x: 60, z: 1250, w: 24, h: 110, color: 0x2f6fb5 },
+        { x: -60, z: 1060, w: 24, h: 85, color: 0xf0b429 },
+      ],
+      route: {
+        departAt: 800, departHeight: 110,
+        // Off the departure end, round to the right, and down the east side
+        // of the field into the city. Heights are above the runway.
+        loop: [[200, -1930, 160], [560, -1960, 170], [850, -1680, 170], [920, -1180, 160],
+          [800, -600, 140], [750, -150, 105]],
+        loopSpacing: 600,
+        maxTurn: 30,
+        streetHeight: 55,
+        cornerRadius: 100,
+        spacing: 280,
+        // [x, z, options]. 'corner' gets a gate on the inside of the bend;
+        // everything else is a gate where it stands. Gates are added on the
+        // straights between so none is more than `spacing` from the next,
+        // except where `fill: false` says not to — used to keep gates out of
+        // junctions the route crosses twice.
+        path: [
+          [750, 150, { h: 85 }],
+          [750, 960, { corner: true }],
+          [300, 960, { corner: true }],
+          [300, 1380, { corner: true }],
+          [120, 1380, {}],
+          [-170, 1380, { h: 45, fill: false }],   // under the skybridge
+          [-470, 1380, { fill: false }],
+          [-750, 1380, { corner: true, fill: false }],
+          [-750, 960, { corner: true }],
+          [-300, 960, { corner: true }],
+          [-300, 1240, {}],
+          [-300, 1600, { corner: true, fill: false }],
+          [0, 1600, { corner: true }],
+          [50, 1440, {}],                         // slalom up the esplanade
+          [-50, 1250, {}],
+          [50, 1060, {}],
+          [0, 800, { h: 48 }],                    // under the twin towers' bridge
+          [0, 380, { h: 80, face: true }],        // through La Grande Arche
+        ],
+      },
     },
-    city: { x: -850, z: -850, radius: 780, count: 110, minH: 90, maxH: 300, corridor: 170 },
     palette: {
-      sky: 0x9fb8cc, fog: 0xb6c8d6, fogNear: 550, fogFar: 3000,
-      sun: 0xfff0e0, sunIntensity: 2.0, hemi: 0xb9cede, ground: 0x556070, hemiIntensity: 1.05,
+      sky: 0x9fbdd6, fog: 0xb9cbd9, fogNear: 650, fogFar: 3300,
+      sun: 0xfff0e0, sunIntensity: 2.1, hemi: 0xb9cede, ground: 0x556070, hemiIntensity: 1.1,
       water: 0x36718c,
       sand: 0xc9c2a8, grass: 0x6b8a5c, rock: 0x86898e, snow: 0xeef1f4,
       body: 0xf2b134, accent: 0x33404a,

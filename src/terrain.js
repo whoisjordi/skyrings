@@ -114,21 +114,33 @@ export function createTerrain(cfg, canyon = null) {
   const rh = cfg.runwayHeading ?? 0;
   const rcos = Math.cos(rh);
   const rsin = Math.sin(rh);
+  const city = cfg.city?.flatten ?? null;
 
   function heightAt(x, z) {
     // Land fades into open ocean before the mesh edge, so no visible seam.
     const d = Math.hypot(x, z);
     const coast = fbm(x + 4000, z + 4000, 2, 0.0009) * 260;
     const falloff = 1 - smoothstep(half * 0.5, half * 0.94, d + coast);
-    if (falloff <= 0) return -120;
+    if (falloff <= 0 && !city) return -120;
 
-    const base = fbm(x, z, 5, 0.00042) * 0.75;
-    const hills = fbm(x, z, 4, 0.0018) * 0.3;
-    const peaks = ridged(x, z) * cfg.mountain;
+    let h = -120;
+    if (falloff > 0) {
+      const base = fbm(x, z, 5, 0.00042) * 0.75;
+      const hills = fbm(x, z, 4, 0.0018) * 0.3;
+      const peaks = ridged(x, z) * cfg.mountain;
 
-    // The plateau rides the same coastal falloff as the relief, so high ground
-    // still runs out into the sea instead of ending at a cliff.
-    let h = ((base + hills + peaks) * cfg.amp + lift) * falloff - cfg.amp * 0.16;
+      // The plateau rides the same coastal falloff as the relief, so high
+      // ground still runs out into the sea instead of ending at a cliff.
+      h = ((base + hills + peaks) * cfg.amp + lift) * falloff - cfg.amp * 0.16;
+    }
+
+    // A city is built on level ground, which then blends back into the
+    // country around it — including out into the sea, as a waterfront.
+    if (city) {
+      const dx = Math.max(city.x0 - x, 0, x - city.x1);
+      const dz = Math.max(city.z0 - z, 0, z - city.z1);
+      h = lerp(cfg.city.ground, h, smoothstep(0, city.blend, Math.hypot(dx, dz)));
+    }
 
     // Airport-local coordinates: the runway lies along local z.
     const rdx = x - cfg.airport.x, rdz = z - cfg.airport.z;

@@ -9,10 +9,10 @@ import * as THREE from 'three';
 import { LEVELS } from '../src/levels.js';
 import { createTerrain, airportYOf, WORLD_SIZE } from '../src/terrain.js';
 import { createAirport } from '../src/airport.js';
-import { buildRoute, buildCanyonRoute, RingSet } from '../src/rings.js';
+import { buildRoute, buildCanyonRoute, buildCityRoute, RingSet } from '../src/rings.js';
 import { createCanyon } from '../src/canyon.js';
 import { padToAxes } from '../src/touch.js';
-import { createCity } from '../src/scenery.js';
+import { createCity } from '../src/city.js';
 import { Plane, TUNE, NITRO } from '../src/plane.js';
 
 let failures = 0;
@@ -27,12 +27,12 @@ function build(cfg) {
   const canyon = createCanyon(cfg, airportYOf(cfg));
   const terrain = createTerrain(cfg, canyon);
   const airport = createAirport(cfg);
-  const gates = canyon
-    ? buildCanyonRoute(cfg, airport, canyon, terrain.heightAt)
-    : buildRoute(cfg, airport, terrain.heightAt);
+  const city = createCity(cfg);
+  let gates;
+  if (canyon) gates = buildCanyonRoute(cfg, airport, canyon, terrain.heightAt);
+  else if (city) gates = buildCityRoute(cfg, airport, terrain.heightAt);
+  else gates = buildRoute(cfg, airport, terrain.heightAt);
   const rings = new RingSet(cfg, gates);
-  const corridor = [airport.center, ...gates.map((g) => g.position), airport.center];
-  const city = createCity(cfg, terrain.heightAt, corridor);
   const plane = new Plane(cfg.palette);
   plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
   return { terrain, airport, canyon, gates, rings, city, plane };
