@@ -542,6 +542,97 @@ export function buildCityRoute(cfg, airport, heightAt) {
   });
 }
 
+/**
+ * The alpine route: up the main valley, over the summit, down the side valley
+ * and round across the lake onto final.
+ *
+ * The valley gates sit on each valley's centreline a set height above its
+ * floor, so the route follows the river; the summit gate sits just above the
+ * top, between the flag poles. The lake turn is the only part sampled off a
+ * curve, as in the open routes.
+ *
+ * @returns {{position:THREE.Vector3, quaternion:THREE.Quaternion}[]} with a
+ *   `summit` property: the index of the summit gate
+ */
+export function buildAlpineRoute(cfg, airport, alps, heightAt) {
+  const spec = cfg.alps.route;
+  const axis = airport.axis;
+  const base = airport.center;
+  const ringR = cfg.route.ringRadius;
+  const nodes = [];
+
+  const depart = base.clone().addScaledVector(axis, spec.departAt);
+  depart.y = heightAt(depart.x, depart.z) + spec.departAGL;
+  nodes.push({ position: depart, dir: axis.clone() });
+
+  const table = (t, x) => {
+    if (x <= t[0][0]) return t[0][1];
+    for (let i = 1; i < t.length; i++) {
+      if (x <= t[i][0]) return lerp(t[i - 1][1], t[i][1], (x - t[i - 1][0]) / (t[i][0] - t[i - 1][0]));
+    }
+    return t[t.length - 1][1];
+  };
+
+  const along = (v, run) => {
+    const s0 = run.from * v.length, s1 = run.to * v.length;
+    const n = Math.max(1, Math.round(Math.abs(s1 - s0) / spec.spacing));
+    for (let k = 0; k <= n; k++) {
+      const s = lerp(s0, s1, k / n);
+      const p = v.at(s);
+      nodes.push({
+        position: new THREE.Vector3(p.x, heightAt(p.x, p.y) + table(run.agl, s / v.length), p.y),
+        dir: null,
+      });
+    }
+  };
+
+  along(alps.valleys[0], spec.main);
+  const S = alps.summit;
+  const summit = nodes.length;
+  nodes.push({
+    position: new THREE.Vector3(S.x, S.top + ringR + spec.summitClearance, S.z),
+    dir: null,
+  });
+  along(alps.valleys[1], spec.trib);
+
+  // Across the lake and round onto final.
+  const final = base.clone().addScaledVector(axis, -spec.finalAt);
+  final.y = base.y + spec.finalAGL;
+  const ctrl = [
+    nodes[nodes.length - 1].position,
+    ...spec.lake.map(([x, z, h]) => new THREE.Vector3(x, h, z)),
+    final,
+  ];
+  const turn = sampleAdaptive(new THREE.CatmullRomCurve3(ctrl, false, 'catmullrom', 0.5), {
+    maxTurn: spec.maxTurn, maxSpacing: 500, minSpacing: 170,
+  });
+  for (const p of turn.slice(1, -1)) nodes.push({ position: p, dir: null });
+  nodes.push({ position: final, dir: axis.clone() });
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const m = new THREE.Matrix4();
+  const d = new THREE.Vector3();
+  const gates = nodes.map((node, i) => {
+    if (node.dir) d.copy(node.dir);
+    else {
+      d.subVectors(
+        nodes[Math.min(nodes.length - 1, i + 1)].position,
+        nodes[Math.max(0, i - 1)].position,
+      );
+    }
+    // The summit gate stands upright between its poles, whatever the climb.
+    if (i === summit) d.y = 0;
+    d.normalize();
+    m.lookAt(node.position, d.clone().add(node.position), up);
+    return {
+      position: node.position,
+      quaternion: new THREE.Quaternion().setFromRotationMatrix(m),
+    };
+  });
+  gates.summit = summit;
+  return gates;
+}
+
 export class RingSet {
   constructor(cfg, gates) {
     this.group = new THREE.Group();

@@ -4,13 +4,15 @@ import * as THREE from 'three';
 import { initInput, Input, setAuxInput } from './input.js';
 import { initTouch } from './touch.js';
 import { createAutopilot } from './autopilot.js';
+import { createLinePilot } from './linepilot.js';
 import { Save } from './save.js';
 import { LEVELS, formatTime } from './levels.js';
 import { createTerrain, WORLD_SIZE, airportYOf, setTerrainQuality } from './terrain.js';
 import { createAirport } from './airport.js';
-import { buildRoute, buildCanyonRoute, buildCityRoute, RingSet } from './rings.js';
+import { buildRoute, buildCanyonRoute, buildCityRoute, buildAlpineRoute, RingSet } from './rings.js';
 import { applySky, createClouds } from './scenery.js';
 import { createCity } from './city.js';
+import { createAlpineShape, createAlpineProps } from './alps.js';
 import { createCanyon } from './canyon.js';
 import { Plane, TUNE } from './plane.js';
 import { ChaseCamera } from './camera.js';
@@ -93,23 +95,32 @@ function loadLevel(index) {
   // The canyon has to exist before the terrain, which is carved to match it,
   // and before the route, which is threaded along it.
   const canyon = createCanyon(cfg, airportYOf(cfg));
-  const terrain = createTerrain(cfg, canyon);
+  // The mountains likewise: the valleys exist before the terrain is built.
+  const alps = createAlpineShape(cfg);
+  const terrain = createTerrain(cfg, canyon, alps);
   const airport = createAirport(cfg);
   // Same idea for the city: the streets come first, the route runs down them.
   const city = createCity(cfg);
   let gates;
   if (canyon) gates = buildCanyonRoute(cfg, airport, canyon, terrain.heightAt);
   else if (city) gates = buildCityRoute(cfg, airport, terrain.heightAt);
+  else if (alps) gates = buildAlpineRoute(cfg, airport, alps, terrain.heightAt);
   else gates = buildRoute(cfg, airport, terrain.heightAt);
   const rings = new RingSet(cfg, gates);
+  // Solid scenery you can hit, and that may animate: the city's buildings and
+  // traffic, or the mountains' forests, chalets and summit flags.
+  const props = city
+    ?? (alps ? createAlpineProps(cfg, alps, terrain.heightAt, gates[gates.summit]) : null);
   const plane = new Plane(cfg.palette);
 
   root.add(terrain.group, airport.group, rings.group, createClouds(cfg), applySky(scene, cfg.palette), plane.object);
-  if (city) root.add(city.group);
+  if (props) root.add(props.group);
   scene.add(root);
 
-  level = { cfg, root, terrain, airport, canyon, gates, rings, city, plane };
-  demo = createAutopilot(level);
+  level = { cfg, root, terrain, airport, canyon, gates, rings, city, props, plane };
+  // The racing-line pilot lands every mission but the canyon, where its
+  // line cuts the bends too fine; the older path-follower flies that one.
+  demo = canyon ? createAutopilot(level) : createLinePilot(level);
   HUD.setLevel(cfg.name);
   resetRun();
 }
@@ -127,7 +138,7 @@ function restartDemo() {
  * completed landing, or a spell with no progress, it simply starts again.
  */
 function runDemo(dt) {
-  const { plane, rings, airport, terrain, city } = level;
+  const { plane, rings, airport, terrain, props } = level;
 
   acc += dt;
   let steps = 0;
@@ -139,8 +150,8 @@ function runDemo(dt) {
       { heightAt: terrain.heightAt, airport });
     rings.update(STEP, plane.position);
 
-    const hitTower = city && !plane.onGround
-      && city.collides(plane.position.x, plane.position.y, plane.position.z);
+    const hitTower = props && !plane.onGround
+      && props.collides(plane.position.x, plane.position.y, plane.position.z);
     const landed = rings.done && plane.onGround && plane.speed < STOPPED;
     const lost = demo.stuck
       || Math.hypot(plane.position.x, plane.position.z) > HARD_BOUND;
@@ -176,7 +187,7 @@ function resetRun() {
 // Simulation step
 // ---------------------------------------------------------------------------
 function step(dt) {
-  const { plane, airport, rings, city, terrain, cfg } = level;
+  const { plane, airport, rings, props, terrain, cfg } = level;
 
   run.time += dt;
 
@@ -203,10 +214,10 @@ function step(dt) {
   if (event) handleEvent(event);
   if (run.outcome) return;
 
-  // Towers are solid.
-  if (city && !plane.onGround
-      && city.collides(plane.position.x, plane.position.y, plane.position.z)) {
-    return fail('Hit a tower');
+  // Towers, trees and flag poles are solid.
+  if (props && !plane.onGround
+      && props.collides(plane.position.x, plane.position.y, plane.position.z)) {
+    return fail(level.city ? 'Hit a building' : 'Hit an obstacle');
   }
 
   // Straying off the map: warn, then end the run.
@@ -353,8 +364,8 @@ function frame(now) {
     runDemo(dt);
   }
 
-  // The traffic keeps moving behind the menus, and stops when you pause.
-  if (level && level.city && state !== 'paused') level.city.update(dt);
+  // Traffic and flags keep moving behind the menus, and stop when you pause.
+  if (level && level.props && state !== 'paused') level.props.update(dt);
 
   Input.endFrame();
   renderer.render(scene, camera);

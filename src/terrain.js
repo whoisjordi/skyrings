@@ -4,6 +4,7 @@
 // both read the same function, so what you see is exactly what you hit.
 
 import * as THREE from 'three';
+import { alpineColor } from './alps.js';
 
 export const WORLD_SIZE = 5000;
 // Cell size is WORLD_SIZE / segments; a level with a carved canyon needs a
@@ -87,8 +88,9 @@ function makePerlin(seed) {
  * Builds the terrain for one level.
  * @param {object} cfg  seed, amp, mountain, palette, airport {x,z}
  * @param {object|null} [canyon] carved into the terrain last, if present
+ * @param {object|null} [alps] replaces the island relief entirely, if present
  */
-export function createTerrain(cfg, canyon = null) {
+export function createTerrain(cfg, canyon = null, alps = null) {
   const noise = makePerlin(cfg.seed);
   const airportY = airportYOf(cfg);
 
@@ -117,6 +119,10 @@ export function createTerrain(cfg, canyon = null) {
   const city = cfg.city?.flatten ?? null;
 
   function heightAt(x, z) {
+    return alps ? flatten(x, z, alps.heightAt(x, z), false) : flatten(x, z, relief(x, z), true);
+  }
+
+  function relief(x, z) {
     // Land fades into open ocean before the mesh edge, so no visible seam.
     const d = Math.hypot(x, z);
     const coast = fbm(x + 4000, z + 4000, 2, 0.0009) * 260;
@@ -141,7 +147,15 @@ export function createTerrain(cfg, canyon = null) {
       const dz = Math.max(city.z0 - z, 0, z - city.z1);
       h = lerp(cfg.city.ground, h, smoothstep(0, city.blend, Math.hypot(dx, dz)));
     }
+    return h;
+  }
 
+  /**
+   * The airfield's apron, and the climb-out corridor. The alpine level has no
+   * corridor: a straight trench capped across the range would cut through
+   * the mountains, and there the valley itself is the way in and out.
+   */
+  function flatten(x, z, h, corridor) {
     // Airport-local coordinates: the runway lies along local z.
     const rdx = x - cfg.airport.x, rdz = z - cfg.airport.z;
     const lx = rdx * rcos - rdz * rsin;
@@ -154,7 +168,7 @@ export function createTerrain(cfg, canyon = null) {
 
     // Cap the terrain under the climb-out and the final approach.
     const along = Math.max(0, Math.abs(lz) - APRON_HALF);
-    const influence = (1 - smoothstep(CORRIDOR_END, CORRIDOR_END + CORRIDOR_FADE, Math.abs(lz)))
+    const influence = !corridor ? 0 : (1 - smoothstep(CORRIDOR_END, CORRIDOR_END + CORRIDOR_FADE, Math.abs(lz)))
       * (1 - smoothstep(CORRIDOR_HALF_W * 0.55, CORRIDOR_HALF_W, Math.abs(lx)));
     if (influence > 0) {
       const ceiling = airportY + along * CORRIDOR_GRADIENT;
@@ -204,7 +218,8 @@ export function createTerrain(cfg, canyon = null) {
     const y = (vp.getY(f) + vp.getY(f + 1) + vp.getY(f + 2)) / 3;
     const flatness = vn.getY(f); // 1 = level ground, 0 = cliff
 
-    if (y < B.sand) c.copy(sand);
+    if (alps) alpineColor(alps, P, vp.getX(f), y, vp.getZ(f), flatness, c);
+    else if (y < B.sand) c.copy(sand);
     else if (flatness < 0.62) c.copy(rock);     // any cliff or canyon wall
     else if (y > B.top) c.lerpColors(rock, snow, smoothstep(B.top, B.top * 1.5, y));
     else c.lerpColors(grass, rock, smoothstep(B.low, B.high, y));

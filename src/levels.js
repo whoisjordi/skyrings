@@ -3,28 +3,85 @@
 
 export const LEVELS = [
   {
-    id: 'valley',
-    name: 'Green Valley',
-    blurb: 'Wide gates over rolling hills. Learn the aeroplane.',
+    id: 'alps',
+    name: 'Alpine Valley',
+    blurb: 'Up the river between the mountains, over the summit between the flags, and home across the lake.',
     seed: 1337,
     amp: 190,
     mountain: 0.25,
-    airport: { x: 0, z: 150 },
+    // The airfield sits on the floor of the main valley, pointing up it.
+    airport: { x: -400, z: 550 },
+    airportY: 40,
     runwayHeading: 0,
-    target: 110,
-    route: {
-      count: 14, radius: 1700, altitude: 320, spread: 0.4, ringRadius: 46,
-      departAt: 900, joinRadius: 750, spacing: 1100, maxTurn: 30,
-      loops: 0, finalAt: 1300,
+    target: 125,
+    segments: 176,        // mountains want a finer mesh than rolling hills
+    cloudBase: 1350,      // above the peaks, not inside them
+    route: { ringRadius: 44 },
+    alps: {
+      base: 380,          // height of the range between the peaks
+      peaks: 850,         // and how far the ridges rise above it
+      rimFrom: 1900, rimTo: 2500, rimLift: 450,
+      snowLine: 640,
+      meadowTop: 150,
+      treeLine: 540,
+      // Two valleys, written from the lake upwards. Tables are [fraction of
+      // the length, value]; floors in units above sea level.
+      valleys: [
+        {
+          // The main valley: wide and flat where the airfield is, then
+          // climbing and narrowing to its head under the summit.
+          points: [[-420, 1500], [-400, 1100], [-400, 500], [-400, -150], [-260, -650],
+            [-520, -1150], [-330, -1600], [-80, -1950]],
+          floor: [[0, 0], [0.08, 40], [0.45, 40], [1, 450]],
+          halfWidth: [[0, 360], [0.45, 320], [0.6, 230], [1, 180]],
+          // The river keeps to one side past the runway.
+          riverOffset: [[0, 150], [0.4, 190], [0.5, 0], [1, 0]],
+          riverWidth: 34,
+          meander: 35,
+        },
+        {
+          // The side valley: down from the other side of the summit.
+          points: [[760, 1500], [820, 900], [650, 350], [850, -250], [600, -850],
+            [820, -1400], [620, -1900]],
+          floor: [[0, 0], [0.15, 30], [1, 470]],
+          halfWidth: [[0, 260], [1, 170]],
+          riverOffset: [[0, 0], [1, 0]],
+          riverWidth: 26,
+          meander: 30,
+        },
+      ],
+      // The summit between the two valley heads.
+      summit: {
+        x: 270, z: -2000, top: 700, flat: 24, slope: 1.05,
+        blendFrom: 330, blendTo: 700, poleGap: 14, poleHeight: 95,
+      },
+      flagColors: [[0xd62828, 0xf4f4f4], [0xd62828, 0xf4f4f4]],
+      lake: { x: 150, z: 1900, rx: 1800, rz: 650, bed: -70 },
+      treeAttempts: 26000,
+      villages: [[-600, 650, 22, 260], [-250, 1180, 10, 200], [900, 1350, 12, 220]],
+      church: [-610, 470],
+      route: {
+        departAt: 800, departAGL: 80,
+        spacing: 380,
+        // Height above the valley floor, by fraction of the valley's length.
+        main: { from: 0.56, to: 0.96, agl: [[0.5, 90], [0.8, 120], [1, 190]] },
+        trib: { from: 0.95, to: 0.12, agl: [[0, 85], [0.8, 110], [1, 180]] },
+        summitClearance: 10,   // ring bottom above the summit top
+        // Out over the lake and round onto final, heading up the valley.
+        lake: [[700, 1850, 70], [350, 2130, 60], [-50, 2170, 55], [-330, 2080, 55]],
+        finalAt: 1300, finalAGL: 60,
+        maxTurn: 30,
+      },
     },
     city: null,
     palette: {
-      sky: 0x8fc9e8, fog: 0xa9d4ea, fogNear: 700, fogFar: 3600,
-      sun: 0xfff3dd, sunIntensity: 2.2, hemi: 0x9ec9e0, ground: 0x4a5a3a, hemiIntensity: 1.0,
-      water: 0x2f7fa8,
-      sand: 0xd9cb92, grass: 0x6f9e52, rock: 0x7d7f83, snow: 0xeef3f6,
+      sky: 0x8ec5ee, fog: 0xbcd8ee, fogNear: 1300, fogFar: 5400,
+      sun: 0xfff4e2, sunIntensity: 2.3, hemi: 0xa9d0ee, ground: 0x4a5a3a, hemiIntensity: 1.05,
+      water: 0x2f8aa3, river: 0x63b6c8,
+      sand: 0xb3aa98, grass: 0x7db357, forest: 0x3d6a33, pasture: 0x93ab62,
+      rock: 0x8c8e92, snow: 0xf5f8fb,
       body: 0xe04f3d, accent: 0xf4e3c1,
-      cloud: 0xffffff, cloudCount: 26,
+      cloud: 0xffffff, cloudCount: 22,
     },
   },
   {

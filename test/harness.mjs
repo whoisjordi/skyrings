@@ -9,11 +9,13 @@ import * as THREE from 'three';
 import { LEVELS } from '../src/levels.js';
 import { createTerrain, airportYOf, WORLD_SIZE } from '../src/terrain.js';
 import { createAirport } from '../src/airport.js';
-import { buildRoute, buildCanyonRoute, buildCityRoute, RingSet } from '../src/rings.js';
+import { buildRoute, buildCanyonRoute, buildCityRoute, buildAlpineRoute, RingSet } from '../src/rings.js';
 import { createCanyon } from '../src/canyon.js';
 import { padToAxes } from '../src/touch.js';
 import { createCity } from '../src/city.js';
+import { createAlpineShape, createAlpineProps } from '../src/alps.js';
 import { Plane, TUNE, NITRO } from '../src/plane.js';
+import { createLinePilot, steerTowards } from '../src/linepilot.js';
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -25,17 +27,21 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 function build(cfg) {
   const canyon = createCanyon(cfg, airportYOf(cfg));
-  const terrain = createTerrain(cfg, canyon);
+  const alps = createAlpineShape(cfg);
+  const terrain = createTerrain(cfg, canyon, alps);
   const airport = createAirport(cfg);
   const city = createCity(cfg);
   let gates;
   if (canyon) gates = buildCanyonRoute(cfg, airport, canyon, terrain.heightAt);
   else if (city) gates = buildCityRoute(cfg, airport, terrain.heightAt);
+  else if (alps) gates = buildAlpineRoute(cfg, airport, alps, terrain.heightAt);
   else gates = buildRoute(cfg, airport, terrain.heightAt);
   const rings = new RingSet(cfg, gates);
+  const props = city
+    ?? (alps ? createAlpineProps(cfg, alps, terrain.heightAt, gates[gates.summit]) : null);
   const plane = new Plane(cfg.palette);
   plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
-  return { terrain, airport, canyon, gates, rings, city, plane };
+  return { terrain, airport, canyon, alps, gates, rings, city, props, plane };
 }
 
 // --- world -----------------------------------------------------------------
@@ -543,7 +549,7 @@ function checkCity(cfg, w) {
     }
   }
 
-  const fly = (speed) => flyCityLine(w, first - 1, speed);
+  const fly = (speed) => flyLine(w, first - 1, speed);
   const slow = fly(100), fast = fly(120);
   for (const f of [slow, fast]) {
     ok(!f.crash && f.gates === gates.length,
@@ -553,14 +559,15 @@ function checkCity(cfg, w) {
 }
 
 /**
- * Flies the racing line through the city under the real flight model.
+ * Flies the racing line through the gates under the real flight model.
  *
  * The line is a centripetal Catmull-Rom through the gates. The pilot steers
  * bank-to-turn: roll until the lift points at where the line is going, then
- * pull. It starts in the air at the last open-country gate.
+ * pull. It starts in the air at gate `from`, and anything solid in the
+ * level's props counts as a crash, as does the ground.
  */
-function flyCityLine(w, from, speed) {
-  const { terrain, airport, gates, city } = w;
+function flyLine(w, from, speed) {
+  const { terrain, airport, gates, props } = w;
   const plane = new Plane(LEVELS[0].palette);
   const rings = new RingSet({ route: { ringRadius: w.rings.radius } }, gates);
   const world = { heightAt: terrain.heightAt, airport };
@@ -583,7 +590,6 @@ function flyCityLine(w, from, speed) {
     new THREE.Matrix4().lookAt(pts[0], samples[5], new THREE.Vector3(0, 1, 0)));
   rings.index = from + 1;
 
-  const UP = new THREE.Vector3(0, 1, 0);
   let at = 0, t = 0, crash = null, worst = 0;
   while (t < 240 && at < N - 5) {
     let best = Infinity;
@@ -594,24 +600,81 @@ function flyCityLine(w, from, speed) {
     worst = Math.max(worst, Math.sqrt(best));
 
     const target = samples[Math.min(N, at + Math.round((plane.speed * 0.6) / step))];
-    const fwd = plane.forward.clone(), up = plane.up.clone(), right = plane.right.clone();
-    const dir = target.clone().sub(plane.position).normalize();
-    // Where the lift should point: at the line, with a little up to hold height.
-    const lift = dir.clone().addScaledVector(fwd, -dir.dot(fwd)).multiplyScalar(2).addScaledVector(UP, 0.25);
-    lift.addScaledVector(fwd, -lift.dot(fwd));
-    const roll = Math.atan2(lift.dot(right), lift.dot(up));
-    const pitch = Math.atan2(dir.dot(up), dir.dot(fwd));
-
+    const { pitch, roll } = steerTowards(plane, target);
     const ev = plane.update(STEP, {
-      pitch: clamp(pitch * 15, -1, 1), roll: clamp(roll * 3, -1, 1), yaw: 0,
+      pitch, roll, yaw: 0,
       throttle: plane.speed < speed ? 1 : -1, brake: plane.speed > speed + 12,
     }, world);
     rings.update(STEP, plane.position);
     if (ev && ev.type === 'crash') { crash = ev.reason; break; }
-    if (city.collides(plane.position.x, plane.position.y, plane.position.z)) { crash = 'hit a building'; break; }
+    if (props && props.collides(plane.position.x, plane.position.y, plane.position.z)) { crash = 'hit an obstacle'; break; }
     t += STEP;
   }
   return { speed, gates: rings.index, crash, t, worst };
+}
+
+// --- the alps --------------------------------------------------------------
+// Alpine Valley promises a route that follows the rivers up one valley and
+// down the other, and crosses the summit between the two flag poles, just
+// above the top. Then the line pilot flies the whole thing from the departure
+// gate, climb to the summit included.
+function checkAlps(cfg, w) {
+  const { alps, gates, terrain } = w;
+  const r = cfg.route.ringRadius;
+
+  // Gates in a valley: over its floor, not over the ridges beside it.
+  const inValley = gates.filter((g) => alps.valleys.some((v) => {
+    const q = v.query(g.position.x, g.position.z);
+    return q && q.dist < v.widthAt(q.s) * 0.6;
+  }));
+  ok(inValley.length >= 14, `only ${inValley.length} gates follow the valleys`);
+
+  // The summit gate sits just above the top, between the poles.
+  const sg = gates[gates.summit].position;
+  const S = alps.summit;
+  const top = terrain.heightAt(S.x, S.z);
+  ok(Math.abs(top - S.top) < 3, `the summit is at ${top.toFixed(0)}, not ${S.top}`);
+  ok(sg.y - r > top + 2 && sg.y - r < top + 40,
+    `the summit gate's lowest point is ${(sg.y - r - top).toFixed(0)} above the top`);
+  ok(Math.hypot(sg.x - S.x, sg.z - S.z) < 5, 'the summit gate is not over the summit');
+  // Poles either side: something solid just outside the ring, nothing inside.
+  const across = new THREE.Vector3(1, 0, 0).applyQuaternion(gates[gates.summit].quaternion);
+  const probe = (d, y) => w.props.collides(sg.x + across.x * d, y, sg.z + across.z * d, 0);
+  const poleD = r + S.poleGap;
+  ok(probe(poleD, top + 40) && probe(-poleD, top + 40), 'no flag poles either side of the summit gate');
+  ok(!probe(0, sg.y) && !probe(r * 0.8, sg.y) && !probe(-r * 0.8, sg.y), 'something solid inside the summit gate');
+
+  const slow = flyLine(w, 0, 100), fast = flyLine(w, 0, 115);
+  for (const f of [slow, fast]) {
+    ok(!f.crash && f.gates === gates.length,
+      `line pilot at ${f.speed}kt: ${f.gates}/${gates.length} gates, ${f.crash ?? 'no crash'}`);
+  }
+  return { inValley: inValley.length, total: gates.length, summitGap: sg.y - r - top, slow, fast, stats: w.props.stats };
+}
+
+// --- the demo ---------------------------------------------------------------
+// Behind the menus the racing-line pilot flies the whole mission: takeoff,
+// every gate, and a landing that the runway accepts. Checked on every level
+// it flies, since an attract mode that crashes is worse than none.
+function flyDemo(w) {
+  const { terrain, airport, gates, props } = w;
+  const plane = new Plane(LEVELS[0].palette);
+  const rings = new RingSet({ route: { ringRadius: w.rings.radius } }, gates);
+  const world = { heightAt: terrain.heightAt, airport };
+  plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
+  const pilot = createLinePilot({ airport, gates });
+  let t = 0, why = 'timed out', landed = false;
+  while (t < 420) {
+    const ev = plane.update(STEP, pilot.update(STEP, plane, rings), world);
+    rings.update(STEP, plane.position);
+    if (ev && (ev.type === 'crash' || ev.type === 'belly')) { why = ev.reason ?? ev.type; break; }
+    if (ev && ev.type === 'touchdown' && rings.done) landed = true;
+    if (!plane.onGround && props && props.collides(plane.position.x, plane.position.y, plane.position.z)) { why = 'hit an obstacle'; break; }
+    if (pilot.stuck) { why = 'stuck'; break; }
+    if (landed && plane.onGround && plane.speed < 4) { why = 'landed'; break; }
+    t += STEP;
+  }
+  return { gates: rings.index, total: gates.length, why, t };
 }
 
 // --- line of sight ----------------------------------------------------------
@@ -791,7 +854,7 @@ function checkGates(cfg, w) {
 // Deliberately a mediocre pilot: proportional attitude control, look-ahead
 // terrain avoidance, a shallow glideslope and a flare.
 function flyMission(w) {
-  const { plane, terrain, airport, rings, city } = w;
+  const { plane, terrain, airport, rings, props } = w;
   const world = { heightAt: terrain.heightAt, airport };
   plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
 
@@ -898,8 +961,8 @@ function flyMission(w) {
       if (ev.type === 'crash') { crash = ev.reason; break; }
       if (ev.type === 'touchdown' && rings.done) landed = true;
     }
-    if (city && !plane.onGround
-        && city.collides(plane.position.x, plane.position.y, plane.position.z)) {
+    if (props && !plane.onGround
+        && props.collides(plane.position.x, plane.position.y, plane.position.z)) {
       hitTower = true; break;
     }
     if (landed && plane.onGround && plane.speed < 4) break;
@@ -987,12 +1050,24 @@ for (const cfg of LEVELS) {
       + `  gates ${c.minBelowRim.toFixed(0)}+ below the rim`
       + `  runway clear by ${c.nearest.toFixed(0)}`);
   }
+  if (cfg.alps) {
+    const a = checkAlps(cfg, build(cfg));
+    console.log(`  alps    ${a.inValley}/${a.total} gates in the valleys  summit gate clears the top by ${a.summitGap.toFixed(0)}`
+      + `  ${a.stats.trees} trees, ${a.stats.houses} chalets`);
+    console.log(`  line    ${a.slow.speed}kt ${a.slow.gates}/${a.total} in ${a.slow.t.toFixed(0)}s off-line ${a.slow.worst.toFixed(0)}`
+      + `  |  ${a.fast.speed}kt ${a.fast.gates} in ${a.fast.t.toFixed(0)}s off-line ${a.fast.worst.toFixed(0)}`);
+  }
   if (cfg.city) {
     const c = checkCity(cfg, build(cfg));
     console.log(`  city    ${c.stats.buildings} buildings, ${c.stats.trees} trees, ${c.stats.cars}+${c.stats.parked} cars`
       + `  ${c.below}/${c.run} gates below the rooftops  legs clear by ${c.tightest}+`);
     console.log(`  line    ${c.slow.speed}kt ${c.slow.gates}/${build(cfg).gates.length} in ${c.slow.t.toFixed(0)}s off-line ${c.slow.worst.toFixed(0)}`
       + `  |  ${c.fast.speed}kt ${c.fast.gates} in ${c.fast.t.toFixed(0)}s off-line ${c.fast.worst.toFixed(0)}`);
+  }
+  if (!cfg.canyon) {
+    const d = flyDemo(build(cfg));
+    ok(d.why === 'landed', `demo pilot: ${d.gates}/${d.total} gates, ${d.why}`);
+    console.log(`  demo    ${d.gates}/${d.total} gates, ${d.why} after ${d.t.toFixed(0)}s`);
   }
   const phys = checkPhysics(cfg, build(cfg));
   console.log(`  flight  rotate ${phys.takeoffTime.toFixed(1)}s / ${phys.rollDist.toFixed(0)}m`
