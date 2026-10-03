@@ -111,7 +111,7 @@ a mission.
 
 ## Version
 
-The title screen shows the version in small letters at the bottom (`v1.4`).
+The title screen shows the version in small letters at the bottom (`v1.5`).
 It is set by `VERSION` in `src/main.js`, not in the page, so it reports the
 code the browser is actually running — if it shows an older number after a
 deploy, the browser is still on cached scripts and needs a hard refresh.
