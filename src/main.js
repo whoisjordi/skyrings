@@ -20,6 +20,7 @@ import { Plane, TUNE } from './plane.js';
 import { ChaseCamera } from './camera.js';
 import { HUD } from './hud.js';
 import { Audio } from './audio.js';
+import { Recorder, createGhost } from './replay.js';
 
 // Physics runs at a fixed step so recorded times mean the same thing on a
 // 60Hz laptop and a 144Hz monitor.
@@ -35,7 +36,7 @@ const STOPPED = 4;          // speed below which a rollout counts as stopped
 // Shown on the title screen. It lives in the script rather than the page so
 // it reports the code actually running: a stale cached module shows its own,
 // older number even when index.html is fresh.
-const VERSION = 'v1.5';
+const VERSION = 'v1.6';
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,6 +76,7 @@ let state = 'menu';        // menu | flying | paused | result
 let run = null;            // per-attempt state
 let demo = null;           // autopilot flying behind the menus
 let onLevelLoaded = null;  // debug hook
+const recorder = new Recorder(STEP);  // this attempt, for the ghost
 
 function disposeLevel() {
   if (!level) return;
@@ -127,13 +129,27 @@ function loadLevel(index) {
   for (const v of droneViews) root.add(v.object);
   scene.add(root);
 
-  level = { cfg, root, terrain, airport, canyon, gates, rings, city, props, plane, sky, drones, droneViews };
+  level = { cfg, root, terrain, airport, canyon, gates, rings, city, props, plane, sky, drones, droneViews, ghost: null };
+  attachGhost();
   // The racing-line pilot lands every mission but the canyon, where its
   // line cuts the bends too fine; the older path-follower flies that one.
   demo = canyon ? createAutopilot(level) : createLinePilot(level);
   HUD.setLevel(cfg.name);
   resetRun();
   if (onLevelLoaded) onLevelLoaded();
+}
+
+/** Swaps in the stored ghost for this mission, if there is one. */
+function attachGhost() {
+  if (level.ghost) {
+    level.root.remove(level.ghost.object);
+    level.ghost.object.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+  }
+  level.ghost = createGhost(Save.ghost(level.cfg.id));
+  if (level.ghost) level.root.add(level.ghost.object);
 }
 
 /** Puts the aeroplane back on the runway and lets the autopilot fly again. */
@@ -189,6 +205,8 @@ function resetRun() {
   level.root.add(level.rings.group);
 
   run = { time: 0, outcome: null, reason: '', landed: false, bellied: false, warned: false };
+  recorder.reset();
+  recorder.tick(plane);
   for (const d of level.drones) d.resetThreat();
   if (touch) touch.resetThrottle();
   chase.snap();
@@ -213,6 +231,7 @@ function step(dt) {
   };
 
   const event = plane.update(dt, ctrl, { heightAt: terrain.heightAt, airport });
+  recorder.tick(plane);
 
   if (rings.update(dt, plane.position)) {
     Audio.ring(rings.index);
@@ -298,6 +317,11 @@ function succeed() {
   run.outcome = 'win';
   const cfg = LEVELS[levelIndex];
   run.isBest = Save.recordTime(cfg.id, run.time);
+  // The ghost is the fastest run that was recorded, which is not always the
+  // best time: a save from before ghosts existed has a time but no ghost.
+  if (!level.ghost || run.time < level.ghost.time) {
+    if (Save.setGhost(cfg.id, recorder.finish(run.time))) attachGhost();
+  }
   Save.unlockThrough(levelIndex + 1);
   Audio.fanfare();
   Audio.stopEngine();
@@ -388,6 +412,10 @@ function frame(now) {
   }
   if (level) for (const v of level.droneViews) v.update(camera, renderer.domElement.height);
   if (level && level.sky) level.sky.position.copy(camera.position);
+  if (level && level.ghost) {
+    const inRun = state === 'flying' || state === 'paused' || state === 'result';
+    level.ghost.update(run.time, state === 'flying' ? dt : 0, inRun && Save.ghostOn);
+  }
 
   Input.endFrame();
   renderer.render(scene, camera);
@@ -435,6 +463,7 @@ function pause() {
   HUD.show(false);
   if (touch) touch.disable();
   $('btn-invert').textContent = Save.invertPitch ? 'ON' : 'OFF';
+  $('btn-ghost').textContent = Save.ghostOn ? 'ON' : 'OFF';
   refreshTouchOptions();
   showScreen('pause');
 }
@@ -529,6 +558,10 @@ $('btn-next').addEventListener('click', () => startLevel(levelIndex + 1));
 $('btn-invert').addEventListener('click', (e) => {
   Save.invertPitch = !Save.invertPitch;
   e.target.textContent = Save.invertPitch ? 'ON' : 'OFF';
+});
+$('btn-ghost').addEventListener('click', (e) => {
+  Save.ghostOn = !Save.ghostOn;
+  e.target.textContent = Save.ghostOn ? 'ON' : 'OFF';
 });
 
 if (touch) {

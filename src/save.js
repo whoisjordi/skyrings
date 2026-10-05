@@ -2,12 +2,15 @@
 // blocked site-data make these throw, and the game must still be playable.
 
 const KEY = 'skyrings.v1';
+// Ghosts are tens of kilobytes each, so they live under their own keys: a
+// full quota then loses a ghost, never the progress.
+const GHOST_KEY = 'skyrings.ghost.';
 
 // TEMPORARY, for testing: every mission is selectable regardless of progress.
 // Set back to false to restore unlock-as-you-go. Progress is still recorded
 // either way, so flipping this does not throw away anyone's unlocks.
 const UNLOCK_ALL = true;
-const EMPTY = { best: {}, unlocked: 1, invertPitch: false, touch: {} };
+const EMPTY = { best: {}, unlocked: 1, invertPitch: false, ghost: true, touch: {} };
 
 let state = load();
 
@@ -51,6 +54,25 @@ export const Save = {
 
   get invertPitch() { return state.invertPitch; },
   set invertPitch(v) { state.invertPitch = !!v; flush(); },
+
+  /** Whether the ghost of your best run flies alongside. */
+  get ghostOn() { return state.ghost !== false; },
+  set ghostOn(v) { state.ghost = !!v; flush(); },
+
+  ghost(id) {
+    try {
+      const raw = localStorage.getItem(GHOST_KEY + id);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  },
+
+  /** Stores a ghost; returns false when storage refused it. */
+  setGhost(id, ghost) {
+    try {
+      localStorage.setItem(GHOST_KEY + id, JSON.stringify(ghost));
+      return true;
+    } catch { return false; }
+  },
 
   /** Phone control preferences: currently just stick or arrows. */
   get touch() { return state.touch ?? {}; },

@@ -19,6 +19,7 @@ import { createLinePilot, steerTowards } from '../src/linepilot.js';
 import { createFlock, ROLE } from '../src/flock/flock.js';
 import { createDragon } from '../src/flock/dragon.js';
 import { createDrones } from '../src/drones.js';
+import { Recorder, decode, sample, SAMPLE_EVERY } from '../src/replay.js';
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -659,7 +660,7 @@ function checkAlps(cfg, w) {
 // Behind the menus the racing-line pilot flies the whole mission: takeoff,
 // every gate, and a landing that the runway accepts. Checked on every level
 // it flies, since an attract mode that crashes is worse than none.
-function flyDemo(w, drones = null) {
+function flyDemo(w, drones = null, onStep = null) {
   const { terrain, airport, gates, props } = w;
   const plane = new Plane(LEVELS[0].palette);
   const rings = new RingSet({ route: { ringRadius: w.rings.radius } }, gates);
@@ -667,8 +668,10 @@ function flyDemo(w, drones = null) {
   plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
   const pilot = createLinePilot({ airport, gates });
   let t = 0, why = 'timed out', landed = false;
+  if (onStep) onStep(plane, 0);
   while (t < 420) {
     const ev = plane.update(STEP, pilot.update(STEP, plane, rings), world);
+    if (onStep) onStep(plane, t + STEP);
     rings.update(STEP, plane.position);
     if (drones) drones.update(STEP, plane.position, plane.velocity);
     if (ev && (ev.type === 'crash' || ev.type === 'belly')) { why = ev.reason ?? ev.type; break; }
@@ -679,6 +682,49 @@ function flyDemo(w, drones = null) {
     t += STEP;
   }
   return { gates: rings.index, total: gates.length, why, t };
+}
+
+// --- ghost replay -----------------------------------------------------------
+// Record the demo pilot's mission the way the game records a run, push it
+// through JSON as localStorage would, and play it back: between samples the
+// ghost must stay on the aeroplane's real path, at every physics step.
+function checkReplay(w) {
+  const rec = new Recorder(STEP);
+  const truth = [];
+  const d = flyDemo(w, null, (plane, t) => {
+    rec.tick(plane);
+    truth.push([t, plane.position.clone(), plane.quaternion.clone()]);
+  });
+  const json = JSON.stringify(rec.finish(d.t));
+  const track = decode(JSON.parse(json));
+  const pos = new THREE.Vector3(), q = new THREE.Quaternion();
+  let worstPos = 0, worstAngle = 0, onSample = 0;
+  // Touchdown sets the aeroplane onto the runway in a single step, a jump the
+  // ghost smooths over one sample; the path either side of it is what counts.
+  const snap = truth.map(([, p], i) => i > 0 && p.distanceTo(truth[i - 1][1]) > 1.5);
+  const nearSnap = (i) => snap.slice(Math.max(0, i - 2 * SAMPLE_EVERY), i + 2 * SAMPLE_EVERY).includes(true);
+  let snaps = 0;
+  truth.forEach(([t, p, qq], i) => {
+    sample(track, t, pos, q);
+    if (i % SAMPLE_EVERY === 0) onSample = Math.max(onSample, pos.distanceTo(p));
+    if (snap[i]) snaps++;
+    if (nearSnap(i)) return;
+    worstPos = Math.max(worstPos, pos.distanceTo(p));
+    worstAngle = Math.max(worstAngle, q.angleTo(qq) * 180 / Math.PI);
+  });
+  ok(snaps <= 2, `replay: the run jumps at most at touchdown (${snaps} snaps)`);
+  const end = sample(track, d.t + 30, pos, q) && pos.distanceTo(truth[truth.length - 1][1]);
+  ok(track && track.time === d.t, 'replay: ghost decodes with its run time');
+  ok(onSample < 0.02, `replay: on a sample the ghost is within 2 cm (${onSample.toFixed(3)})`);
+  ok(worstPos < 0.5, `replay: between samples it stays within 0.5 m of the path (${worstPos.toFixed(2)})`);
+  // The line pilot's attitude can buzz by a degree or so from one 1/120 s
+  // step to the next; 30 Hz samples see through that, which is fine to watch.
+  ok(worstAngle < 2.5, `replay: and within 2.5 deg of the attitude (${worstAngle.toFixed(2)})`);
+  ok(end < 0.5, `replay: after the end it waits where the run stopped (${end.toFixed(2)})`);
+  ok(decode({ ...JSON.parse(json), v: 0 }) === null && decode(null) === null && decode({ v: 1 }) === null,
+    'replay: a ghost from another format, or junk, is refused');
+  ok(json.length < 400_000, `replay: a ${d.t.toFixed(0)} s run stores in ${(json.length / 1024).toFixed(0)} KB`);
+  return { kb: json.length / 1024, t: d.t, worstPos, worstAngle };
 }
 
 // --- line of sight ----------------------------------------------------------
@@ -1262,6 +1308,8 @@ for (const cfg of LEVELS) {
     const d = flyDemo(build(cfg));
     ok(d.why === 'landed', `demo pilot: ${d.gates}/${d.total} gates, ${d.why}`);
     console.log(`  demo    ${d.gates}/${d.total} gates, ${d.why} after ${d.t.toFixed(0)}s`);
+    const g = checkReplay(build(cfg));
+    console.log(`  ghost   ${g.t.toFixed(0)}s run in ${g.kb.toFixed(0)} KB, off the path by ${g.worstPos.toFixed(2)} m / ${g.worstAngle.toFixed(2)} deg at worst`);
   }
   const phys = checkPhysics(cfg, build(cfg));
   console.log(`  flight  rotate ${phys.takeoffTime.toFixed(1)}s / ${phys.rollDist.toFixed(0)}m`

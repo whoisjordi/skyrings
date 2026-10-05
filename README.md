@@ -2,7 +2,8 @@
 
 A small low-poly arcade flight game that runs in the browser. Take off from the
 runway, fly the gates in order, come back and land. Four missions — Alpine
-Valley, Canyon Run, City Towers and Dragon Night — your best time saved for each.
+Valley, Canyon Run, City Towers and Dragon Night — your best time saved for each,
+and a ghost of that run flying alongside your next attempt.
 
 **Play:** https://whoisjordi.github.io/skyrings/
 
@@ -54,6 +55,10 @@ at the bottom left is green when it is safe to land.
 thrust multiplier rather than a speed multiplier: 129 → 298 kt with the gear
 down, 143 → 323 kt with it up. Turns go noticeably wider while it is lit, which
 is the trade that makes it a decision rather than a free button.
+
+**Ghost.** Finish a mission and a pale, see-through aeroplane flies your fastest
+run alongside the next attempt, from the same start — race it. It cannot be hit
+and nothing reacts to it. Switch it off with *Ghost* in the pause menu.
 
 ## On a phone
 
@@ -111,7 +116,7 @@ a mission.
 
 ## Version
 
-The title screen shows the version in small letters at the bottom (`v1.5`).
+The title screen shows the version in small letters at the bottom (`v1.6`).
 It is set by `VERSION` in `src/main.js`, not in the page, so it reports the
 code the browser is actually running — if it shows an older number after a
 deploy, the browser is still on cached scripts and needs a hard refresh.
@@ -154,7 +159,8 @@ src/hud.js      DOM HUD, off-screen target arrow
 src/audio.js    synthesised engine, chimes and crash noise (no audio files)
 src/input.js    keyboard state, plus an optional auxiliary source
 src/touch.js    phone controls: stick or arrow pad, throttle slider, buttons
-src/save.js     localStorage best times and unlocks
+src/save.js     localStorage best times, unlocks and ghosts
+src/replay.js   ghost replay: records a run's poses, stores them, flies them back
 src/levels.js   the four missions as data
 test/harness.mjs headless checks — see "Tests"
 ```
@@ -455,6 +461,33 @@ past.
 Everything solid is a collider, trees included, in an 80-unit grid. The
 rings' straight legs clear every building by 26 or more.
 
+### Ghost replay
+
+`src/replay.js` records the run as it happened — the aeroplane's position,
+attitude, gear and throttle — rather than the controls. Re-simulating stored
+inputs would be smaller, but it breaks the moment the flight model is retuned,
+and `Math.sin` and friends may differ between browsers, so a replay could
+drift off the route on another machine. A recorded pose plays back the same
+everywhere.
+
+- **Sampling.** Every 4th physics step, so 30 Hz. Each sample is rounded
+  (positions to 1 cm, the quaternion to 1e-4) and stored as the difference from
+  the previous one. A two-minute run is about 95 KB of JSON, under its own
+  `localStorage` key per mission, so a full quota costs a ghost and never the
+  progress.
+- **Playback.** Position on a uniform Catmull-Rom curve through the samples,
+  attitude by a normalised lerp. Between samples it stays within 10 cm and
+  2 deg of the real flight; at the touchdown snap it smooths a single-step jump
+  of a couple of metres. After the end it waits where the run stopped.
+- **Which run.** The fastest one recorded, which is not always the best time —
+  a save from before ghosts has a time but no ghost, so the first finish
+  records one. A ghost with a different `GHOST_FORMAT` is ignored.
+- **The model** is the same airframe as the player's, pale blue with
+  materials cloned to 38 % opacity and no depth writes.
+
+A retuned flight model does not invalidate ghosts: they still play, though
+they may show a run the new physics would not allow.
+
 ### Gate detection
 
 Each gate stores a fixed world→gate matrix. A crossing is a sign change of the
@@ -526,6 +559,10 @@ import `three`. The suite builds every level and asserts:
   mission through them all, landing included, without touching a drone.
 - **The demo** — on every level but the canyon, the racing-line pilot takes off,
   flies every gate and lands, under the same rules as a player.
+- **The ghost** — the demo's run is recorded as the game records one, sent
+  through JSON and played back: within 2 cm on a sample, 0.5 m and 2.5 deg
+  between samples, the only jump is the touchdown, it waits where it stopped,
+  junk or another format is refused, and it stores in under 400 KB.
 - **The city** — the city gates are below the surrounding rooftops, every leg
   between them clears every building by at least 12, the last gate fits
   inside the Arche's opening, and each skybridge has a gate under it that the
@@ -553,7 +590,8 @@ smoke signal, not a specification.
       an approach hint ("too fast", "too steep") once the gates are cleared
 - [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
 - [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
-- [ ] Ghost replay of your best run
+- [ ] Watch-your-run replay after a mission: play/pause/scrub and flyby
+      cameras, reusing the ghost's recording
 - [ ] The racing-line pilot meets the wall on Canyon Run's bends; a line that
       keeps to the gorge's centreline between gates, instead of a spline through
       them, should let it fly the canyon demo too and retire the old autopilot
