@@ -20,7 +20,7 @@ import { Plane, TUNE } from './plane.js';
 import { ChaseCamera } from './camera.js';
 import { HUD } from './hud.js';
 import { Audio } from './audio.js';
-import { Recorder, createGhost } from './replay.js';
+import { Recorder, createGhost, decode, sample, poseAt } from './replay.js';
 
 // Physics runs at a fixed step so recorded times mean the same thing on a
 // 60Hz laptop and a 144Hz monitor.
@@ -36,7 +36,7 @@ const STOPPED = 4;          // speed below which a rollout counts as stopped
 // Shown on the title screen. It lives in the script rather than the page so
 // it reports the code actually running: a stale cached module shows its own,
 // older number even when index.html is fresh.
-const VERSION = 'v1.6';
+const VERSION = 'v1.7';
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,11 +72,12 @@ addEventListener('resize', () => {
 // ---------------------------------------------------------------------------
 let level = null;          // built world for the current mission
 let levelIndex = 0;
-let state = 'menu';        // menu | flying | paused | result
+let state = 'menu';        // menu | flying | paused | result | replay
 let run = null;            // per-attempt state
 let demo = null;           // autopilot flying behind the menus
 let onLevelLoaded = null;  // debug hook
 const recorder = new Recorder(STEP);  // this attempt, for the ghost
+let replay = null;         // watching the attempt back from the result screen
 
 function disposeLevel() {
   if (!level) return;
@@ -193,16 +194,22 @@ function runDemo(dt) {
   chase.update(dt, plane, plane.speed / TUNE.maxSpeed, plane.nitroBlend);
 }
 
-function resetRun() {
-  const { plane, airport, cfg } = level;
-  plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
-
-  // Rebuild the ring set to reset gate order and colour, reusing the gates the
-  // level was built with rather than generating them again.
+/**
+ * Rebuilds the ring set to reset gate order and colour, reusing the gates the
+ * level was built with rather than generating them again.
+ */
+function resetRings() {
   level.root.remove(level.rings.group);
   level.rings.dispose();
-  level.rings = new RingSet(cfg, level.gates);
+  level.rings = new RingSet(level.cfg, level.gates);
   level.root.add(level.rings.group);
+}
+
+function resetRun() {
+  const { plane, airport } = level;
+  plane.reset(airport.start.x, airport.start.y, airport.start.z, airport.start.heading);
+
+  resetRings();
 
   run = { time: 0, outcome: null, reason: '', landed: false, bellied: false, warned: false };
   recorder.reset();
@@ -329,6 +336,82 @@ function succeed() {
 }
 
 // ---------------------------------------------------------------------------
+// Watching a run back
+// ---------------------------------------------------------------------------
+// The attempt just flown, played from its recording: the aeroplane itself is
+// put into each recorded pose, and the gates are flown through again so they
+// light up as they did. Nothing is simulated, so nothing can turn out
+// differently.
+
+function startReplay() {
+  const track = decode(recorder.finish(run.time));
+  if (!track) return;
+  replay = { track, t: 0, playing: true, dead: level.plane.dead };
+  level.plane.dead = false;
+  state = 'replay';
+  hideScreens();
+  $('replay-bar').classList.remove('hidden');
+  seekReplay(0);
+}
+
+/**
+ * Jumps to time t. The gates are replayed from the start along the recorded
+ * path, so going back un-clears the ones not yet reached.
+ */
+function seekReplay(t) {
+  const { track } = replay;
+  replay.t = Math.max(0, Math.min(track.time, t));
+  resetRings();
+  const p = new THREE.Vector3(), q = new THREE.Quaternion();
+  for (let s = 0; s <= replay.t; s += track.dt) {
+    sample(track, s, p, q);
+    level.rings.update(track.dt, p);
+  }
+  poseAt(track, replay.t, level.plane, 0);
+  chase.snap();
+}
+
+function runReplay(dt) {
+  const { plane } = level;
+  const { track } = replay;
+
+  if (Input.tapped('Space') || Input.tapped('KeyP')) toggleReplayPlay();
+  if (Input.tapped('ArrowLeft')) seekReplay(replay.t - 5);
+  if (Input.tapped('ArrowRight')) seekReplay(replay.t + 5);
+  if (Input.tapped('KeyC')) chase.toggle();
+  if (Input.tapped('Escape')) return endReplay();
+
+  const step = replay.playing ? dt : 0;
+  replay.t = Math.min(track.time, replay.t + step);
+  poseAt(track, replay.t, plane, step);
+  if (step && level.rings.update(step, plane.position)) Audio.ring(level.rings.index);
+  // Stop on the last frame rather than loop: the end is usually what you
+  // wanted to see again.
+  if (replay.t >= track.time && replay.playing) toggleReplayPlay();
+
+  chase.update(dt, plane, plane.speed / TUNE.maxSpeed, 0);
+  $('rp-time').textContent = `${formatTime(replay.t)} / ${formatTime(track.time)}`;
+}
+
+function toggleReplayPlay() {
+  // Play from the end means watch it again.
+  if (!replay.playing && replay.t >= replay.track.time) seekReplay(0);
+  replay.playing = !replay.playing;
+  $('rp-play').textContent = replay.playing ? '❚❚' : '▶';
+}
+
+function endReplay() {
+  if (state !== 'replay') return;
+  // Leave the aeroplane where the run ended, as the result screen found it.
+  poseAt(replay.track, replay.track.time, level.plane, 0);
+  level.plane.dead = replay.dead;
+  replay = null;
+  $('replay-bar').classList.add('hidden');
+  state = 'result';
+  showScreen('result');
+}
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 let last = performance.now();
@@ -398,6 +481,8 @@ function frame(now) {
     if (Input.tapped('Escape') || Input.tapped('KeyP')) pause();
   } else if (state === 'menu' && level && demo) {
     runDemo(dt);
+  } else if (state === 'replay') {
+    runReplay(dt);
   }
 
   // Traffic and flags keep moving behind the menus, and stop when you pause.
@@ -407,7 +492,7 @@ function frame(now) {
   // crashed aeroplane is no longer something to get out of the way of.
   if (level && state !== 'paused') {
     const p = level.plane;
-    const live = (state === 'flying' || state === 'menu') && !p.dead;
+    const live = (state === 'flying' || state === 'menu' || state === 'replay') && !p.dead;
     for (const d of level.drones) d.update(dt, live ? p.position : null, live ? p.velocity : null);
   }
   if (level) for (const v of level.droneViews) v.update(camera, renderer.domElement.height);
@@ -508,6 +593,7 @@ function showResult() {
   $('res-time').textContent = formatTime(run.time);
   $('res-best').textContent = formatTime(Save.bestTime(cfg.id));
   $('res-pb').classList.toggle('hidden', !(won && run.isBest));
+  $('btn-replay').disabled = !decode(recorder.finish(run.time));
 
   const hasNext = levelIndex + 1 < LEVELS.length;
   const next = $('btn-next');
@@ -554,6 +640,13 @@ $('btn-restart').addEventListener('click', () => { resetRun(); resume(); });
 $('btn-quit').addEventListener('click', toMenu);
 $('btn-retry').addEventListener('click', () => startLevel(levelIndex));
 $('btn-menu').addEventListener('click', toMenu);
+$('btn-replay').addEventListener('click', startReplay);
+// Blurred after each click, or Space would press the focused button as well
+// as toggling playback.
+for (const [id, fn] of [['rp-play', toggleReplayPlay], ['rp-back', () => seekReplay(replay.t - 5)],
+  ['rp-fwd', () => seekReplay(replay.t + 5)], ['rp-exit', endReplay]]) {
+  $(id).addEventListener('click', (e) => { e.currentTarget.blur(); fn(); });
+}
 $('btn-next').addEventListener('click', () => startLevel(levelIndex + 1));
 $('btn-invert').addEventListener('click', (e) => {
   Save.invertPitch = !Save.invertPitch;
@@ -582,6 +675,8 @@ if (new URLSearchParams(location.search).has('debug')) {
     get state() { return state; },
     loadLevel,
     startLevel,
+    startReplay,
+    get replay() { return replay; },
     /** Freeze the demo and look from a fixed point. */
     look(from, to) {
       state = 'shot';

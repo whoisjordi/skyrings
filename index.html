@@ -129,6 +129,16 @@
   .stat .v{font-size:27px;font-variant-numeric:tabular-nums}
   .pb{color:var(--warn);text-align:center;margin-top:16px;font-size:12px;letter-spacing:.2em}
 
+  /* ---------- replay ---------- */
+  #replay-bar{position:fixed;left:50%;bottom:22px;translate:-50% 0;z-index:6;display:flex;
+    align-items:center;gap:8px;padding:8px 10px;border-radius:12px;max-width:calc(100vw - 32px);
+    background:rgba(8,14,24,.72);border:1px solid var(--edge);backdrop-filter:blur(6px)}
+  #replay-bar.hidden{display:none}
+  #replay-bar button{padding:8px 12px;font-size:11px;letter-spacing:.1em}
+  #replay-bar .rt{font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums;
+    min-width:112px;text-align:center}
+  #replay-bar .tag{font-size:10px;color:var(--warn);letter-spacing:.2em}
+
   .opt{display:flex;justify-content:space-between;align-items:center;gap:12px;
     margin-top:14px;font-size:11px;color:var(--dim);letter-spacing:.1em}
   .opt button{padding:7px 14px;font-size:11px}
@@ -356,9 +366,19 @@
     <div class="btns">
       <button class="primary" id="btn-next">Next mission</button>
       <button id="btn-retry">Retry</button>
+      <button id="btn-replay">Watch replay</button>
       <button id="btn-menu">Mission select</button>
     </div>
   </div>
+</div>
+
+<div id="replay-bar" class="hidden">
+  <span class="tag">REPLAY</span>
+  <button id="rp-back" title="Back 5 s (←)">−5s</button>
+  <button id="rp-play" title="Pause / play (Space)">❚❚</button>
+  <button id="rp-fwd" title="Forward 5 s (→)">+5s</button>
+  <span class="rt" id="rp-time">0:00.0</span>
+  <button id="rp-exit" title="Back to results (Esc)">Done</button>
 </div>
 
 <div id="loading"><div>LOADING…</div></div>

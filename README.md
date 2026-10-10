@@ -160,7 +160,7 @@ src/audio.js    synthesised engine, chimes and crash noise (no audio files)
 src/input.js    keyboard state, plus an optional auxiliary source
 src/touch.js    phone controls: stick or arrow pad, throttle slider, buttons
 src/save.js     localStorage best times, unlocks and ghosts
-src/replay.js   ghost replay: records a run's poses, stores them, flies them back
+src/replay.js   records a run's poses; flies them back as a ghost or a replay
 src/levels.js   the four missions as data
 test/harness.mjs headless checks — see "Tests"
 ```
@@ -479,6 +479,12 @@ everywhere.
   attitude by a normalised lerp. Between samples it stays within 10 cm and
   2 deg of the real flight; at the touchdown snap it smooths a single-step jump
   of a couple of metres. After the end it waits where the run stopped.
+- **Watching it back.** "Watch replay" on the result screen, after a finish or
+  a crash, poses the real aeroplane from the attempt just flown (`poseAt`),
+  with its speed taken from the path so the chase camera and the drones react
+  as they did. The gates are flown through again, and a seek replays them from
+  the start so going back un-clears them. Space pauses, ←/→ jump 5 s, C swaps
+  the camera, Esc goes back; it stops on the last frame.
 - **Which run.** The fastest one recorded, which is not always the best time —
   a save from before ghosts has a time but no ghost, so the first finish
   records one. A ghost with a different `GHOST_FORMAT` is ignored.
@@ -590,8 +596,8 @@ smoke signal, not a specification.
       an approach hint ("too fast", "too steep") once the gates are cleared
 - [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
 - [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
-- [ ] Watch-your-run replay after a mission: play/pause/scrub and flyby
-      cameras, reusing the ghost's recording
+- [x] Watch-your-run replay after a mission: play/pause and ±5 s seek
+- [ ] Replay: a scrub bar, slow motion and flyby cameras
 - [ ] The racing-line pilot meets the wall on Canyon Run's bends; a line that
       keeps to the gorge's centreline between gates, instead of a spline through
       them, should let it fly the canyon demo too and retire the old autopilot
