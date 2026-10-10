@@ -1,5 +1,6 @@
-// Ghost replay: records a run as the aeroplane's pose over time, and plays it
-// back as a see-through aeroplane flying alongside the next attempt.
+// Replays: records a run as the aeroplane's pose over time. Played back as a
+// see-through ghost flying alongside the next attempt, or as the aeroplane
+// itself when you watch a run back.
 //
 // It records what happened, not the controls. Re-simulating stored inputs
 // would be smaller, but it breaks the moment the flight model is retuned, and
@@ -10,7 +11,6 @@
 // The recorder and the codec only read x/y/z/w fields, so the headless tests
 // drive them with the real flight model; only createGhost builds anything.
 
-import * as THREE from 'three';
 import { Plane } from './plane.js';
 
 // Bump when the stored layout changes; older ghosts are then ignored.
@@ -115,6 +115,29 @@ export function sample(track, t, pos, quat) {
   };
 }
 
+const _a = { x: 0, y: 0, z: 0 }, _b = { x: 0, y: 0, z: 0 }, _q = { x: 0, y: 0, z: 0, w: 1 };
+
+/**
+ * Puts a Plane into the recorded pose at t: position, attitude, gear and
+ * propeller, with velocity and speed taken from the path so the camera and
+ * the drones see it moving as it did.
+ */
+export function poseAt(track, t, plane, dt) {
+  const { gear, throttle } = sample(track, t, plane.position, _q);
+  plane.quaternion.set(_q.x, _q.y, _q.z, _q.w);
+  const t0 = Math.max(0, t - track.dt), t1 = Math.min(track.time, t + track.dt);
+  sample(track, t1, _a, _q);
+  sample(track, t0, _b, _q);
+  const span = t1 - t0 || 1;
+  plane.velocity.set((_a.x - _b.x) / span, (_a.y - _b.y) / span, (_a.z - _b.z) / span);
+  plane.speed = plane.velocity.length();
+  plane.throttle = throttle;
+  plane.gearPos = gear;
+  plane._applyGearVisual();
+  plane.propSpin += (2 + throttle * 46) * dt;
+  if (plane._prop) plane._prop.rotation.z = plane.propSpin;
+}
+
 // ---------------------------------------------------------------------------
 // The visible ghost: the same airframe, pale and see-through.
 // ---------------------------------------------------------------------------
@@ -134,7 +157,6 @@ export function createGhost(ghostData) {
   });
   model.object.renderOrder = 2;   // after the world, so it blends over it
   model.object.visible = false;
-  const q = new THREE.Quaternion();
 
   return {
     object: model.object,
@@ -142,12 +164,7 @@ export function createGhost(ghostData) {
     update(t, dt, show) {
       model.object.visible = show;
       if (!show) return;
-      const { gear, throttle } = sample(track, t, model.position, q);
-      model.quaternion.copy(q);
-      model.gearPos = gear;
-      model._applyGearVisual();
-      model.propSpin += (2 + throttle * 46) * dt;
-      if (model._prop) model._prop.rotation.z = model.propSpin;
+      poseAt(track, t, model, dt);
     },
   };
 }
