@@ -21,6 +21,7 @@ import { ChaseCamera } from './camera.js';
 import { HUD } from './hud.js';
 import { Audio } from './audio.js';
 import { Recorder, createGhost, decode, sample, poseAt } from './replay.js';
+import { ReplayCamera, REPLAY_VIEWS, VIEW_LABEL } from './replaycam.js';
 
 // Physics runs at a fixed step so recorded times mean the same thing on a
 // 60Hz laptop and a 144Hz monitor.
@@ -36,7 +37,7 @@ const STOPPED = 4;          // speed below which a rollout counts as stopped
 // Shown on the title screen. It lives in the script rather than the page so
 // it reports the code actually running: a stale cached module shows its own,
 // older number even when index.html is fresh.
-const VERSION = 'v1.7';
+const VERSION = 'v1.8';
 
 const $ = (id) => document.getElementById(id);
 
@@ -78,6 +79,7 @@ let demo = null;           // autopilot flying behind the menus
 let onLevelLoaded = null;  // debug hook
 const recorder = new Recorder(STEP);  // this attempt, for the ghost
 let replay = null;         // watching the attempt back from the result screen
+let replayView = 'chase';  // the replay camera last chosen, kept between replays
 
 function disposeLevel() {
   if (!level) return;
@@ -343,10 +345,14 @@ function succeed() {
 // light up as they did. Nothing is simulated, so nothing can turn out
 // differently.
 
-function startReplay() {
-  const track = decode(recorder.finish(run.time));
+/** Plays the attempt just flown, or any stored recording (the debug hooks). */
+function startReplay(recording = recorder.finish(run.time)) {
+  const track = decode(recording);
   if (!track) return;
-  replay = { track, t: 0, playing: true, dead: level.plane.dead };
+  const cam = new ReplayCamera(camera, chase, track, { heightAt: level.terrain.heightAt, props: level.props });
+  cam.setView(replayView);
+  replay = { track, t: 0, playing: true, dead: level.plane.dead, cam };
+  showReplayView();
   level.plane.dead = false;
   state = 'replay';
   hideScreens();
@@ -368,7 +374,21 @@ function seekReplay(t) {
     level.rings.update(track.dt, p);
   }
   poseAt(track, replay.t, level.plane, 0);
-  chase.snap();
+  replay.cam.snap();
+}
+
+function setReplayView(view) {
+  replay.cam.setView(view);
+  replayView = view;
+  showReplayView();
+}
+
+function nextReplayView() {
+  setReplayView(REPLAY_VIEWS[(REPLAY_VIEWS.indexOf(replay.cam.view) + 1) % REPLAY_VIEWS.length]);
+}
+
+function showReplayView() {
+  $('rp-cam').textContent = `Cam: ${VIEW_LABEL[replay.cam.view]}`;
 }
 
 function runReplay(dt) {
@@ -378,7 +398,8 @@ function runReplay(dt) {
   if (Input.tapped('Space') || Input.tapped('KeyP')) toggleReplayPlay();
   if (Input.tapped('ArrowLeft')) seekReplay(replay.t - 5);
   if (Input.tapped('ArrowRight')) seekReplay(replay.t + 5);
-  if (Input.tapped('KeyC')) chase.toggle();
+  if (Input.tapped('KeyC') || Input.tapped('KeyV')) nextReplayView();
+  REPLAY_VIEWS.forEach((v, i) => { if (Input.tapped(`Digit${i + 1}`)) setReplayView(v); });
   if (Input.tapped('Escape')) return endReplay();
 
   const step = replay.playing ? dt : 0;
@@ -389,7 +410,7 @@ function runReplay(dt) {
   // wanted to see again.
   if (replay.t >= track.time && replay.playing) toggleReplayPlay();
 
-  chase.update(dt, plane, plane.speed / TUNE.maxSpeed, 0);
+  replay.cam.update(dt, plane, replay.t, plane.speed / TUNE.maxSpeed);
   $('rp-time').textContent = `${formatTime(replay.t)} / ${formatTime(track.time)}`;
 }
 
@@ -406,6 +427,7 @@ function endReplay() {
   poseAt(replay.track, replay.track.time, level.plane, 0);
   level.plane.dead = replay.dead;
   replay = null;
+  chase.snap();
   $('replay-bar').classList.add('hidden');
   state = 'result';
   showScreen('result');
@@ -640,11 +662,12 @@ $('btn-restart').addEventListener('click', () => { resetRun(); resume(); });
 $('btn-quit').addEventListener('click', toMenu);
 $('btn-retry').addEventListener('click', () => startLevel(levelIndex));
 $('btn-menu').addEventListener('click', toMenu);
-$('btn-replay').addEventListener('click', startReplay);
+$('btn-replay').addEventListener('click', () => startReplay());
 // Blurred after each click, or Space would press the focused button as well
 // as toggling playback.
 for (const [id, fn] of [['rp-play', toggleReplayPlay], ['rp-back', () => seekReplay(replay.t - 5)],
-  ['rp-fwd', () => seekReplay(replay.t + 5)], ['rp-exit', endReplay]]) {
+  ['rp-fwd', () => seekReplay(replay.t + 5)], ['rp-exit', endReplay],
+  ['rp-cam', nextReplayView]]) {
   $(id).addEventListener('click', (e) => { e.currentTarget.blur(); fn(); });
 }
 $('btn-next').addEventListener('click', () => startLevel(levelIndex + 1));
@@ -676,6 +699,8 @@ if (new URLSearchParams(location.search).has('debug')) {
     loadLevel,
     startLevel,
     startReplay,
+    seekReplay,
+    setReplayView,
     get replay() { return replay; },
     /** Freeze the demo and look from a fixed point. */
     look(from, to) {

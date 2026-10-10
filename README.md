@@ -161,6 +161,7 @@ src/input.js    keyboard state, plus an optional auxiliary source
 src/touch.js    phone controls: stick or arrow pad, throttle slider, buttons
 src/save.js     localStorage best times, unlocks and ghosts
 src/replay.js   records a run's poses; flies them back as a ghost or a replay
+src/replaycam.js replay cameras: behind, side, above, and a planned flyby
 src/levels.js   the four missions as data
 test/harness.mjs headless checks — see "Tests"
 ```
@@ -483,8 +484,26 @@ everywhere.
   a crash, poses the real aeroplane from the attempt just flown (`poseAt`),
   with its speed taken from the path so the chase camera and the drones react
   as they did. The gates are flown through again, and a seek replays them from
-  the start so going back un-clears them. Space pauses, ←/→ jump 5 s, C swaps
-  the camera, Esc goes back; it stops on the last frame.
+  the start so going back un-clears them. Space pauses, ←/→ jump 5 s, Esc
+  goes back; it stops on the last frame.
+- **Cameras** (`src/replaycam.js`; C or the Cam button cycles, 1-4 pick):
+  *behind* is the game's own chase camera; *side* rides off a wingtip and
+  crosses to the other side when a wall is in the way; *above* sits high
+  behind, looking down the route ahead; *flyby* cuts every 4 s between fixed
+  spots the aeroplane flies past, zooming to keep it the same size on screen.
+  Side and above smooth only their offset from the aeroplane, so they never
+  trail it at speed.
+- **Where the flyby stands.** Not hand-placed: a hand-placed spot only suits
+  the line its author imagined. Each shot is planned from the recording when
+  first needed — candidate spots beside and ahead of that 4 s stretch (two
+  points along it, three distances off, three heights, both sides) are scored
+  by how many of eleven positions on the stretch they can see, sight lines
+  tested against the terrain height field and the props' colliders. A tower
+  may hide the aeroplane for a moment; a spot that loses it for most of the
+  shot never wins. Ties go to the near, low spot and to the opposite side
+  from the last shot. About 1-2 ms a shot. The harness re-checks every shot
+  at four times the density: all of them see the aeroplane the whole time on
+  every mission, the canyon included.
 - **Which run.** The fastest one recorded, which is not always the best time —
   a save from before ghosts has a time but no ghost, so the first finish
   records one. A ghost with a different `GHOST_FORMAT` is ignored.
@@ -597,7 +616,8 @@ smoke signal, not a specification.
 - [ ] Gear-up belly slide could throw sparks and leave a scrape on the runway
 - [ ] Nitro deserves a visual: exhaust flare and a bit of screen distortion
 - [x] Watch-your-run replay after a mission: play/pause and ±5 s seek
-- [ ] Replay: a scrub bar, slow motion and flyby cameras
+- [x] Replay cameras: behind, side, above and an auto-cutting flyby
+- [ ] Replay: a scrub bar and slow motion
 - [ ] The racing-line pilot meets the wall on Canyon Run's bends; a line that
       keeps to the gorge's centreline between gates, instead of a spline through
       them, should let it fly the canyon demo too and retire the old autopilot

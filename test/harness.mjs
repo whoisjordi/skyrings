@@ -20,6 +20,7 @@ import { createFlock, ROLE } from '../src/flock/flock.js';
 import { createDragon } from '../src/flock/dragon.js';
 import { createDrones } from '../src/drones.js';
 import { Recorder, decode, sample, poseAt, SAMPLE_EVERY } from '../src/replay.js';
+import { createFlybyPlanner, sightClear } from '../src/replaycam.js';
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -735,8 +736,68 @@ function checkReplay(w, cfg) {
   });
   ok(worstActor < 0.5, `replay: the watched aeroplane follows the path (${worstActor.toFixed(2)} m)`);
   ok(worstSpeed < 5, `replay: and at the speed it flew (${worstSpeed.toFixed(2)} off)`);
+  // Flyby: every shot's spot is clear of the ground and the props, and sees
+  // the aeroplane for most of its stretch. Checked here at 4x the planner's
+  // own probe density, so a spot that only works on its probes shows up.
+  const world = { heightAt: w.terrain.heightAt, props: w.props };
+  const t0 = performance.now();
+  const flyby = createFlybyPlanner(track, world);
+  const shots = [];
+  for (let i = 0; i < flyby.count; i++) shots.push(flyby.at(i * 4 + 0.01));
+  const planMs = (performance.now() - t0) / shots.length;
+  let worstShot = 1, sumVis = 0, inside = 0, flips = 0;
+  shots.forEach((sh, i) => {
+    if (sh.y < w.terrain.heightAt(sh.x, sh.z) + 1 || (w.props && w.props.collides(sh.x, sh.y, sh.z, 0))) inside++;
+    if (i && sh.side !== shots[i - 1].side) flips++;
+    let seen = 0, n = 0;
+    for (let t = sh.t0; t <= sh.t1; t += (sh.t1 - sh.t0) / 40 || 1) {
+      sample(track, t, pos, q); n++;
+      if (sightClear(world, sh, pos)) seen++;
+    }
+    worstShot = Math.min(worstShot, seen / n);
+    sumVis += seen / n;
+  });
+  ok(inside === 0, `flyby: no camera spot inside the ground or a prop (${inside})`);
+  ok(worstShot >= 0.6, `flyby: every shot sees the aeroplane at least 60% of the time (worst ${(worstShot * 100).toFixed(0)}%)`);
+  ok(planMs < 50, `flyby: a shot plans in under 50 ms (${planMs.toFixed(1)})`);
+  const fly = { shots: shots.length, mean: sumVis / shots.length, worst: worstShot, planMs, flips };
   ok(json.length < 400_000, `replay: a ${d.t.toFixed(0)} s run stores in ${(json.length / 1024).toFixed(0)} KB`);
-  return { kb: json.length / 1024, t: d.t, worstPos, worstAngle };
+  return { kb: json.length / 1024, t: d.t, worstPos, worstAngle, fly };
+}
+
+// The canyon has no pilot that can fly it in the tests, and its walls are the
+// hardest place to find a flyby spot, so plan along a run through its gates
+// at a steady 80 m/s instead.
+function checkCanyonFlyby(w) {
+  const pts = [w.airport.start, ...w.gates.map((g) => g.position)];
+  const plane = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion(), gearPos: 0, throttle: 1 };
+  const rec = new Recorder(STEP);
+  let t = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = new THREE.Vector3(pts[i - 1].x, pts[i - 1].y, pts[i - 1].z), b = new THREE.Vector3(pts[i].x, pts[i].y, pts[i].z);
+    const steps = Math.ceil(a.distanceTo(b) / 80 / STEP);
+    for (let k = 0; k < steps; k++, t += STEP) { plane.position.lerpVectors(a, b, k / steps); rec.tick(plane); }
+  }
+  const track = decode(rec.finish(t));
+  const world = { heightAt: w.terrain.heightAt, props: w.props };
+  const flyby = createFlybyPlanner(track, world);
+  const pos = new THREE.Vector3(), q = new THREE.Quaternion();
+  let worst = 1, sum = 0, buried = 0;
+  for (let i = 0; i < flyby.count; i++) {
+    const sh = flyby.at(i * 4 + 0.01);
+    let seen = 0, n = 0;
+    for (let tt = sh.t0; tt <= sh.t1; tt += 0.1) {
+      sample(track, tt, pos, q);
+      if (pos.y < w.terrain.heightAt(pos.x, pos.z) + 5) { buried++; continue; }   // straight leg cut through rock
+      n++; if (sightClear(world, sh, pos)) seen++;
+    }
+    if (!n) continue;
+    worst = Math.min(worst, seen / n);
+    sum += seen / n;
+  }
+  if (buried) console.log(`          ${buried} samples of the straight test path run through rock and are skipped`);
+  ok(worst >= 0.6, `flyby in the canyon: every shot sees the aeroplane 60% of the time (worst ${(worst * 100).toFixed(0)}%)`);
+  return { shots: flyby.count, mean: sum / flyby.count, worst };
 }
 
 // --- line of sight ----------------------------------------------------------
@@ -1316,12 +1377,18 @@ for (const cfg of LEVELS) {
     console.log(`  line    ${c.slow.speed}kt ${c.slow.gates}/${build(cfg).gates.length} in ${c.slow.t.toFixed(0)}s off-line ${c.slow.worst.toFixed(0)}`
       + `  |  ${c.fast.speed}kt ${c.fast.gates} in ${c.fast.t.toFixed(0)}s off-line ${c.fast.worst.toFixed(0)}`);
   }
+  if (cfg.canyon) {
+    const f = checkCanyonFlyby(build(cfg));
+    console.log(`  flyby   ${f.shots} shots along the gates, plane in view ${(f.mean * 100).toFixed(0)}% on average, worst shot ${(f.worst * 100).toFixed(0)}%`);
+  }
   if (!cfg.canyon) {
     const d = flyDemo(build(cfg));
     ok(d.why === 'landed', `demo pilot: ${d.gates}/${d.total} gates, ${d.why}`);
     console.log(`  demo    ${d.gates}/${d.total} gates, ${d.why} after ${d.t.toFixed(0)}s`);
     const g = checkReplay(build(cfg), cfg);
     console.log(`  ghost   ${g.t.toFixed(0)}s run in ${g.kb.toFixed(0)} KB, off the path by ${g.worstPos.toFixed(2)} m / ${g.worstAngle.toFixed(2)} deg at worst`);
+    console.log(`  flyby   ${g.fly.shots} shots, plane in view ${(g.fly.mean * 100).toFixed(0)}% on average, worst shot ${(g.fly.worst * 100).toFixed(0)}%, `
+      + `${g.fly.flips} side swaps, ${g.fly.planMs.toFixed(1)} ms a shot`);
   }
   const phys = checkPhysics(cfg, build(cfg));
   console.log(`  flight  rotate ${phys.takeoffTime.toFixed(1)}s / ${phys.rollDist.toFixed(0)}m`

@@ -138,6 +138,8 @@
   #replay-bar .rt{font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums;
     min-width:112px;text-align:center}
   #replay-bar .tag{font-size:10px;color:var(--warn);letter-spacing:.2em}
+  #rp-cam{min-width:118px}
+  @media (max-width:640px){#replay-bar .tag{display:none}#replay-bar .rt{min-width:0}#rp-cam{min-width:0}}
 
   .opt{display:flex;justify-content:space-between;align-items:center;gap:12px;
     margin-top:14px;font-size:11px;color:var(--dim);letter-spacing:.1em}
@@ -378,6 +380,7 @@
   <button id="rp-play" title="Pause / play (Space)">❚❚</button>
   <button id="rp-fwd" title="Forward 5 s (→)">+5s</button>
   <span class="rt" id="rp-time">0:00.0</span>
+  <button id="rp-cam" title="Switch camera (C, or 1-4)">Cam: Behind</button>
   <button id="rp-exit" title="Back to results (Esc)">Done</button>
 </div>
 
